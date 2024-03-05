@@ -9,6 +9,22 @@ import random
 
 from typing import Optional
 
+def invent_object() -> dict:
+    """
+    Invent a kind of object.
+    
+    Return a dict with "name" and "symbol" set.
+    """
+    
+    result = {
+        "symbol": random.choice("!#$%^&*()"),
+        "name": random.choice(["cat", "dog", "unruly pub patron", "stick", "moderately large stick", "hole in the ground", "crushing sense of dread"])
+    }
+    
+    return result
+    
+    
+
 class GameState:
     """
     Game state base class.
@@ -81,7 +97,9 @@ class PlayingState(GameState):
             x = random.randint(-10, 10)
             y = random.randint(-10, 10)
             if self.object_at(x, y) is None:
-                self.objects.append(WorldObject(x, y, "?"))
+                # Put something here
+                object_type = invent_object()
+                self.objects.append(WorldObject(x, y, object_type["symbol"], object_type["name"]))
                 
         self.log("Hello World")
             
