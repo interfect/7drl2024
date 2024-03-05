@@ -3,6 +3,10 @@ import tcod.context
 import tcod.event
 import tcod.tileset
 
+from tcod.event import KeySym
+
+import random
+
 class GameState:
     """
     Game state base class.
@@ -16,18 +20,25 @@ class GameState:
         """
         raise NotImplementedError()
     
-    def handle_event(self, event: tcod.event.Event):
+    def handle_event(self, event: tcod.event.Event) -> None:
         """
         Handle the given user input event.
         """
         raise NotImplementedError()
         
         
-class Player:
-    def __init__(self):
-        self.x = 0
-        self.y = 0
-        self.symbol = "@"
+class WorldObject:
+    """
+    Represents an object in the world.
+    """
+    def __init__(self, x: int, y: int, symbol: str) -> None:
+        self.x = x
+        self.y = y
+        self.symbol = symbol
+        
+class Player(WorldObject):
+    def __init__(self) -> None:
+        super().__init__(0, 0, "@")
         
 class PlayingState(GameState):
     """
@@ -36,23 +47,77 @@ class PlayingState(GameState):
     Walk around as an @.
     """
     
-    def __init__(self):
+    def __init__(self) -> None:
         self.player = Player()
+        self.objects = [self.player]
+        
+        for _ in range(random.randrange(5, 10)):
+            self.objects.append(WorldObject(random.randint(-10, 10), random.randint(-10, 10), "?"))
     
-    def render_to(self, console: tcod.console.Console):
+    def render_to(self, console: tcod.console.Console) -> None:
         console.clear()
         console.draw_frame(0, 0, console.width, console.height, "Super RPG 640x480")
+        
+        # Draw a world view inset in the frame
+        self.draw_world(console, 1, 1, console.width - 2, console.height - 2)
+        
         console.print(1, 1, "Hello World")
         
+    def draw_world(self, console: tcod.console.Console, x: int, y: int, width: int, height: int) -> None:
+        """
+        Draw the world into a region of the given console.
+        """
+        
         # Find where to put the view upper left corner to center the player
-        view_x = self.player.x - console.width // 2
-        view_y = self.player.y - console.height // 2
+        view_x = self.player.x - width // 2
+        view_y = self.player.y - height // 2
         
-        for to_render in [self.player]:
-            console.print(to_render.x - view_x, to_render.y - view_y, to_render.symbol)
+        for to_render in self.objects:
+            x_in_view = to_render.x - view_x
+            y_in_view = to_render.y - view_y
+            if x_in_view >= 0 and x_in_view < width and y_in_view >= 0 and y_in_view < height:
+                console.print(x_in_view + x, y_in_view + y, to_render.symbol)
+
         
-    def handle_event(self, event: tcod.event.Event):
-        pass
+    
+    DIRECTION_KEYS = {
+        # Arrow keys
+        KeySym.LEFT: (-1, 0),
+        KeySym.RIGHT: (1, 0),
+        KeySym.UP: (0, -1),
+        KeySym.DOWN: (0, 1),
+        # Arrow key diagonals
+        KeySym.HOME: (-1, -1),
+        KeySym.END: (-1, 1),
+        KeySym.PAGEUP: (1, -1),
+        KeySym.PAGEDOWN: (1, 1),
+        # Keypad
+        KeySym.KP_4: (-1, 0),
+        KeySym.KP_6: (1, 0),
+        KeySym.KP_8: (0, -1),
+        KeySym.KP_2: (0, 1),
+        KeySym.KP_7: (-1, -1),
+        KeySym.KP_1: (-1, 1),
+        KeySym.KP_9: (1, -1),
+        KeySym.KP_3: (1, 1),
+        # VI keys
+        KeySym.h: (-1, 0),
+        KeySym.l: (1, 0),
+        KeySym.k: (0, -1),
+        KeySym.j: (0, 1),
+        KeySym.y: (-1, -1),
+        KeySym.b: (-1, 1),
+        KeySym.u: (1, -1),
+        KeySym.n: (1, 1),
+    }
+    
+    def handle_event(self, event: tcod.event.Event) -> None:
+        if isinstance(event, tcod.event.KeyDown) and event.sym in self.DIRECTION_KEYS:
+            direction = self.DIRECTION_KEYS[event.sym]
+            
+            self.player.x += direction[0]
+            self.player.y += direction[1]
+            
         
 
 
