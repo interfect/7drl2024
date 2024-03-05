@@ -33,15 +33,28 @@ class WorldObject:
     """
     Represents an object in the world.
     """
-    def __init__(self, x: int, y: int, symbol: str, z_layer: int = 0) -> None:
+    def __init__(self, x: int, y: int, symbol: str, name: str = "object", z_layer: int = 0) -> None:
         self.x = x
         self.y = y
         self.symbol = symbol
+        self.name = name
         self.z_layer = z_layer
+        
+    def indefinite_name(self) -> str:
+        """
+        Get the name of the object formatted with an article, if applicable.
+        """
+        VOWELS = "aeiou"
+        if self.name.lower()[0] in VOWELS:
+            article = "an"
+        else:
+            article = "a"
+        return f"{article} {self.name}"
+            
         
 class Player(WorldObject):
     def __init__(self) -> None:
-        super().__init__(0, 0, "@", 1)
+        super().__init__(0, 0, "@", "Player", z_layer=1)
         
 class PlayingState(GameState):
     """
@@ -51,14 +64,26 @@ class PlayingState(GameState):
     """
     
     def __init__(self) -> None:
+        """
+        Set up a fresh game state.
+        """
+        # Hang on to the player specifically
         self.player = Player()
+        
+        # But put them in the list of all point objects.
         self.objects = [self.player]
         
+        # Keep track of log messages and their counts
+        self.logs: list[tuple[str, int]] = []
+        
+        # Make an initial map
         for _ in range(random.randrange(5, 10)):
             x = random.randint(-10, 10)
             y = random.randint(-10, 10)
             if self.object_at(x, y) is None:
                 self.objects.append(WorldObject(x, y, "?"))
+                
+        self.log("Hello World")
             
     def object_at(self, x: int, y: int) -> Optional[WorldObject]:
         """
@@ -68,18 +93,37 @@ class PlayingState(GameState):
             if obj.x == x and obj.y == y:
                 return obj
         return None
+        
+    def log(self, message: str) -> None:
+        if len(self.logs) > 0 and self.logs[-1][0] == message:
+            # A duplicate. Increase the count.
+            self.logs[-1] = (self.logs[-1][0], self.logs[-1][1] + 1)
+        else:
+            self.logs.append((message, 1))
     
     def render_to(self, console: tcod.console.Console) -> None:
         # Make sure higher-Z objects draw on top
         self.objects.sort(key=lambda o: o.z_layer)
+        
+        # Compute layout
+        
+        LOG_HEIGHT = 3
     
         console.clear()
-        console.draw_frame(0, 0, console.width, console.height, "Super RPG 640x480")
+        console.draw_frame(0, 0, console.width, console.height - LOG_HEIGHT, "Super RPG 640x480")
         
         # Draw a world view inset in the frame
-        self.draw_world(console, 1, 1, console.width - 2, console.height - 2)
+        self.draw_world(console, 1, 1, console.width - 2, console.height - LOG_HEIGHT - 2)
         
-        console.print(1, 1, "Hello World")
+        log_start_height = console.height - LOG_HEIGHT
+        for log_message, log_count in reversed(self.logs):
+            # Lay out log messages newest at the top, older below
+            if log_count > 1:
+                # Duplicate messages are expressed with counts
+                log_message += f" x{log_count}"
+            log_start_height += console.print_box(0, log_start_height, console.width, LOG_HEIGHT, log_message)
+            if log_start_height >= console.height:
+                break
         
     def draw_world(self, console: tcod.console.Console, x: int, y: int, width: int, height: int) -> None:
         """
@@ -142,7 +186,7 @@ class PlayingState(GameState):
                 self.player.y = next_y
             else:
                 # The playeer is bumping something. Use/fight/take it.
-                pass
+                self.log(f"Your path is obstructed by {obstruction.indefinite_name()}!")
             
         
 
