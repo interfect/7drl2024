@@ -7,6 +7,8 @@ from tcod.event import KeySym
 
 import random
 
+from typing import Optional
+
 class GameState:
     """
     Game state base class.
@@ -31,14 +33,15 @@ class WorldObject:
     """
     Represents an object in the world.
     """
-    def __init__(self, x: int, y: int, symbol: str) -> None:
+    def __init__(self, x: int, y: int, symbol: str, z_layer: int = 0) -> None:
         self.x = x
         self.y = y
         self.symbol = symbol
+        self.z_layer = z_layer
         
 class Player(WorldObject):
     def __init__(self) -> None:
-        super().__init__(0, 0, "@")
+        super().__init__(0, 0, "@", 1)
         
 class PlayingState(GameState):
     """
@@ -52,9 +55,24 @@ class PlayingState(GameState):
         self.objects = [self.player]
         
         for _ in range(random.randrange(5, 10)):
-            self.objects.append(WorldObject(random.randint(-10, 10), random.randint(-10, 10), "?"))
+            x = random.randint(-10, 10)
+            y = random.randint(-10, 10)
+            if self.object_at(x, y) is None:
+                self.objects.append(WorldObject(x, y, "?"))
+            
+    def object_at(self, x: int, y: int) -> Optional[WorldObject]:
+        """
+        Get the object at the given coordinates, or None.
+        """
+        for obj in self.objects:
+            if obj.x == x and obj.y == y:
+                return obj
+        return None
     
     def render_to(self, console: tcod.console.Console) -> None:
+        # Make sure higher-Z objects draw on top
+        self.objects.sort(key=lambda o: o.z_layer)
+    
         console.clear()
         console.draw_frame(0, 0, console.width, console.height, "Super RPG 640x480")
         
