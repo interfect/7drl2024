@@ -1,3 +1,4 @@
+import tcod
 import tcod.console
 import tcod.context
 import tcod.event
@@ -19,6 +20,21 @@ def invent_object() -> dict:
     result = {
         "symbol": random.choice("!#$%^&*()"),
         "name": random.choice(["cat", "dog", "unruly pub patron", "stick", "moderately large stick", "hole in the ground", "crushing sense of dread"])
+    }
+    
+    return result
+    
+def invent_enemy() -> dict:
+    """
+    Invent a kind of enemy.
+    
+    Return a dict with "name", "symbol" and "health" set. Health migth be a string.
+    """
+    
+    result = {
+        "symbol": random.choice("abcdef"),
+        "name": random.choice(["dire cat", "evil stick", "boss", "really cool guy who doesn't affraid of anything", "nasal demon"]),
+        "health": str(random.randint(1, 3) * 10)
     }
     
     return result
@@ -56,9 +72,15 @@ class WorldObject:
         self.name = name
         self.z_layer = z_layer
         
+    def definite_name(self) -> str:
+        """
+        Get the name of the object formatted with a definite article, if applicable.
+        """
+        return f"the {self.name}"
+    
     def indefinite_name(self) -> str:
         """
-        Get the name of the object formatted with an article, if applicable.
+        Get the name of the object formatted with an indefinite article, if applicable.
         """
         VOWELS = "aeiou"
         if self.name.lower()[0] in VOWELS:
@@ -66,8 +88,24 @@ class WorldObject:
         else:
             article = "a"
         return f"{article} {self.name}"
-            
         
+    def nominative_pronoun(self) -> str:
+        """
+        Get the nominative pronoun to refer to the object.
+        """
+        
+        return "it"
+        
+class Enemy(WorldObject):
+    """
+    Represents an enemy that can be attacked.
+    """
+    def __init__(self, x: int, y: int, symbol: str, name: str = "enemy", health: int = 10):
+        super().__init__(x, y, symbol, name)
+        
+        self.max_health = health
+        self.health = health
+         
 class Player(WorldObject):
     def __init__(self) -> None:
         super().__init__(0, 0, "@", "Player", z_layer=1)
@@ -83,6 +121,10 @@ class PlayingState(GameState):
         """
         Set up a fresh game state.
         """
+        
+        # Set to true to trigger victory screen
+        self.game_won = False
+        
         # Hang on to the player specifically
         self.player = Player()
         
@@ -93,13 +135,22 @@ class PlayingState(GameState):
         self.logs: list[tuple[str, int]] = []
         
         # Make an initial map
-        for _ in range(random.randrange(5, 10)):
-            x = random.randint(-10, 10)
-            y = random.randint(-10, 10)
+        MAP_RANGE = 10
+        for _ in range(random.randrange(5, 7)):
+            x = random.randint(-MAP_RANGE, MAP_RANGE)
+            y = random.randint(-MAP_RANGE, MAP_RANGE)
             if self.object_at(x, y) is None:
                 # Put something here
                 object_type = invent_object()
                 self.objects.append(WorldObject(x, y, object_type["symbol"], object_type["name"]))
+        
+        for _ in range(random.randrange(1, 3)):
+            x = random.randint(-MAP_RANGE, MAP_RANGE)
+            y = random.randint(-MAP_RANGE, MAP_RANGE)
+            if self.object_at(x, y) is None:
+                enemy_type = invent_enemy()
+                self.objects.append(Enemy(x, y, enemy_type["symbol"], enemy_type["name"], int(enemy_type["health"])))
+                
                 
         self.log("Hello World")
             
@@ -124,7 +175,6 @@ class PlayingState(GameState):
         self.objects.sort(key=lambda o: o.z_layer)
         
         # Compute layout
-        
         LOG_HEIGHT = 3
     
         console.clear()
@@ -133,6 +183,7 @@ class PlayingState(GameState):
         # Draw a world view inset in the frame
         self.draw_world(console, 1, 1, console.width - 2, console.height - LOG_HEIGHT - 2)
         
+        # Draw the log messages
         log_start_height = console.height - LOG_HEIGHT
         for log_message, log_count in reversed(self.logs):
             # Lay out log messages newest at the top, older below
@@ -142,6 +193,14 @@ class PlayingState(GameState):
             log_start_height += console.print_box(0, log_start_height, console.width, LOG_HEIGHT, log_message)
             if log_start_height >= console.height:
                 break
+                
+        BANNER_WIDTH = 20
+        BANNER_HEIGHT = 3
+        if self.game_won:
+            # Print a big victory banner
+            console.draw_frame(console.width // 2 - BANNER_WIDTH // 2, console.height // 2 - BANNER_HEIGHT // 2, BANNER_WIDTH, BANNER_HEIGHT, decoration="╔═╗║ ║╚═╝", fg=(0, 255, 0))
+            console.print_box(console.width // 2 - BANNER_WIDTH // 2 + 1, console.height // 2 - BANNER_HEIGHT // 2 + 1, BANNER_WIDTH - 2, BANNER_HEIGHT - 2, "You Win!", fg=(0, 255, 0), alignment=tcod.CENTER)
+            
         
     def draw_world(self, console: tcod.console.Console, x: int, y: int, width: int, height: int) -> None:
         """
@@ -191,23 +250,44 @@ class PlayingState(GameState):
     
     def handle_event(self, event: tcod.event.Event) -> None:
         if isinstance(event, tcod.event.KeyDown) and event.sym in self.DIRECTION_KEYS:
-            # The player wants to move.
-            direction = self.DIRECTION_KEYS[event.sym]
-            
-            next_x = self.player.x + direction[0]
-            next_y = self.player.y + direction[1]
-            
-            obstruction = self.object_at(next_x, next_y)
-            if obstruction is None:
-                # You can just move there
-                self.player.x = next_x
-                self.player.y = next_y
-            else:
-                # The playeer is bumping something. Use/fight/take it.
-                self.log(f"Your path is obstructed by {obstruction.indefinite_name()}!")
-            
+            if not self.game_won:
+                # The player wants to move.
+                direction = self.DIRECTION_KEYS[event.sym]
+                
+                next_x = self.player.x + direction[0]
+                next_y = self.player.y + direction[1]
+                
+                obstruction = self.object_at(next_x, next_y)
+                if obstruction is None:
+                    # You can just move there
+                    self.player.x = next_x
+                    self.player.y = next_y
+                elif isinstance(obstruction, Enemy):
+                    # Time to fight!
+                    damage = random.randint(1, 10)
+                    obstruction.health -= damage
+                    message = f"You attack {obstruction.definite_name()} for {damage} damage!"
+                    if obstruction.health > 0:
+                        message += f" Now {obstruction.nominative_pronoun()} has {obstruction.health}/{obstruction.max_health} HP."
+                    else:
+                        # It is dead now
+                        self.objects.remove(obstruction)
+                        message += f" You kill {obstruction.nominative_pronoun()}!"
+                    self.log(message)
+                    
+                    # Check for winning
+                    has_enemies = False
+                    for obj in self.objects:
+                        if isinstance(obj, Enemy):
+                            has_enemies = True
+                            break
+                    if not has_enemies:
+                        self.game_won = True
+                        self.log("All enemies have been defeated! You are victorious!")
+                else:
+                    # The playeer is bumping something.
+                    self.log(f"Your path is obstructed by {obstruction.indefinite_name()}!")
         
-
 
 def force_min_size(context: tcod.context.Context) -> None:
     """
