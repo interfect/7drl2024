@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 import tcod
 import tcod.console
 import tcod.context
@@ -6,20 +8,47 @@ import tcod.tileset
 
 from tcod.event import KeySym
 
+from llama_cpp import Llama, LlamaGrammar
+
+import json
+import os
 import random
 
 from typing import Optional
+from urllib.request import urlretrieve
 
-def invent_object() -> dict:
-    """
-    Invent a kind of object.
+class Generator:
     
-    Return a dict with "name" and "symbol" set.
-    """
+    MODEL_URLS = {
+        "tinyllama-1.1b-1t-openorca.Q4_K_M.gguf": "https://huggingface.co/TheBloke/TinyLlama-1.1B-1T-OpenOrca-GGUF/resolve/main/tinyllama-1.1b-1t-openorca.Q4_K_M.gguf",
+        "mistral-7b-v0.1.Q4_K_M.gguf": "https://huggingface.co/TheBloke/Mistral-7B-v0.1-GGUF/resolve/main/mistral-7b-v0.1.Q4_K_M.gguf"
+    }
+
+    MODEL="tinyllama-1.1b-1t-openorca.Q4_K_M.gguf"
+    #MODEL="mistral-7b-v0.1.Q4_K_M.gguf"
+
+    def __init__(self):
+        self.grammar = LlamaGrammar.from_string(open("./rogue.gbnf").read())
+
+        if not os.path.exists(self.MODEL):
+            print("Download model")
+            urlretrieve(self.MODEL_URLS[self.MODEL], self.MODEL)
     
-    result = {
-        "symbol": random.choice("!#$%^&*()"),
-        "name": random.choice([
+        print("Load model")
+        self.model = Llama(
+            model_path=self.MODEL,
+        )
+        print("Model loaded")
+        
+        
+    def invent(self, prompt: str) -> dict:
+        result = self.model(prompt, grammar=self.grammar, stop=["\n\n"], max_tokens=-1, mirostat_mode=2)
+        generated = json.loads(result["choices"][0]["text"])
+        print(f"Invented: {generated}")
+        return generated
+    
+    def invent_object(self) -> dict:
+        example = random.choice([
             "cat",
             "dog",
             "unruly pub patron",
@@ -28,32 +57,17 @@ def invent_object() -> dict:
             "hole in the ground",
             "crushing sense of dread"
         ])
-    }
+        return self.invent(f"Here is a JSON object describing an object for my 7DRL roguelike, way better than \"{example}\":\n")
     
-    return result
-    
-def invent_enemy() -> dict:
-    """
-    Invent a kind of enemy.
-    
-    Return a dict with "name", "symbol" and "health" set. Health migth be a string.
-    """
-    
-    result = {
-        "symbol": random.choice("abcdef"),
-        "name": random.choice([
+    def invent_enemy(self) -> dict:
+        example = random.choice([
             "dire cat",
             "evil stick",
             "boss",
             "really cool guy who doesn't affraid of anything",
             "nasal demon"
-        ]),
-        "health": str(random.randint(1, 3) * 10)
-    }
-    
-    return result
-    
-    
+        ])
+        return self.invent(f"Here is a JSON object describing an enemy for my 7DRL roguelike, way better than \"{example}\":\n")
 
 class GameState:
     """
@@ -149,20 +163,21 @@ class PlayingState(GameState):
         self.logs: list[tuple[str, int]] = []
         
         # Make an initial map
+        generator = Generator()
         MAP_RANGE = 10
         for _ in range(random.randrange(5, 7)):
             x = random.randint(-MAP_RANGE, MAP_RANGE)
             y = random.randint(-MAP_RANGE, MAP_RANGE)
             if self.object_at(x, y) is None:
                 # Put something here
-                object_type = invent_object()
+                object_type = generator.invent_object()
                 self.objects.append(WorldObject(x, y, object_type["symbol"], object_type["name"]))
         
         for _ in range(random.randrange(1, 3)):
             x = random.randint(-MAP_RANGE, MAP_RANGE)
             y = random.randint(-MAP_RANGE, MAP_RANGE)
             if self.object_at(x, y) is None:
-                enemy_type = invent_enemy()
+                enemy_type = generator.invent_enemy()
                 self.objects.append(Enemy(x, y, enemy_type["symbol"], enemy_type["name"], int(enemy_type["health"])))
                 
                 
@@ -324,6 +339,8 @@ def main() -> None:
         width, height = context.recommended_console_size()
         console = tcod.console.Console(width, height)
         
+        last_window_size = context.sdl_window.size
+        
         while True: 
             # Main loop
             
@@ -338,9 +355,11 @@ def main() -> None:
                 if isinstance(event, tcod.event.Quit):
                     raise SystemExit()
                 elif isinstance(event, tcod.event.WindowResized):
-                    force_min_size(context)
-                    width, height = context.recommended_console_size()
-                    console = tcod.console.Console(width, height)
+                    if context.sdl_window.size != last_window_size:
+                        force_min_size(context)
+                        width, height = context.recommended_console_size()
+                        console = tcod.console.Console(width, height)
+                        last_window_size = context.sdl_window.size
                 else:
                     # Other events are probably input so let the game state deal with them.
                     state.handle_event(event)
