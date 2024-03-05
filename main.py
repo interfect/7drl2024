@@ -96,8 +96,6 @@ class PlayingState(GameState):
             if x_in_view >= 0 and x_in_view < width and y_in_view >= 0 and y_in_view < height:
                 console.print(x_in_view + x, y_in_view + y, to_render.symbol)
 
-        
-    
     DIRECTION_KEYS = {
         # Arrow keys
         KeySym.LEFT: (-1, 0),
@@ -131,10 +129,20 @@ class PlayingState(GameState):
     
     def handle_event(self, event: tcod.event.Event) -> None:
         if isinstance(event, tcod.event.KeyDown) and event.sym in self.DIRECTION_KEYS:
+            # The player wants to move.
             direction = self.DIRECTION_KEYS[event.sym]
             
-            self.player.x += direction[0]
-            self.player.y += direction[1]
+            next_x = self.player.x + direction[0]
+            next_y = self.player.y + direction[1]
+            
+            obstruction = self.object_at(next_x, next_y)
+            if obstruction is None:
+                # You can just move there
+                self.player.x = next_x
+                self.player.y = next_y
+            else:
+                # The playeer is bumping something. Use/fight/take it.
+                pass
             
         
 
