@@ -19,7 +19,15 @@ def invent_object() -> dict:
     
     result = {
         "symbol": random.choice("!#$%^&*()"),
-        "name": random.choice(["cat", "dog", "unruly pub patron", "stick", "moderately large stick", "hole in the ground", "crushing sense of dread"])
+        "name": random.choice([
+            "cat",
+            "dog",
+            "unruly pub patron",
+            "stick",
+            "moderately large stick",
+            "hole in the ground",
+            "crushing sense of dread"
+        ])
     }
     
     return result
@@ -33,7 +41,13 @@ def invent_enemy() -> dict:
     
     result = {
         "symbol": random.choice("abcdef"),
-        "name": random.choice(["dire cat", "evil stick", "boss", "really cool guy who doesn't affraid of anything", "nasal demon"]),
+        "name": random.choice([
+            "dire cat",
+            "evil stick",
+            "boss",
+            "really cool guy who doesn't affraid of anything",
+            "nasal demon"
+        ]),
         "health": str(random.randint(1, 3) * 10)
     }
     
