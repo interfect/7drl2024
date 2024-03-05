@@ -3,7 +3,40 @@ import tcod.context
 import tcod.event
 import tcod.tileset
 
-def force_min_size(context: tcod.context.Context):
+class GameState:
+    """
+    Game state base class.
+    
+    Can be swapped between for a game state state machine.
+    """
+    
+    def render_to(self, console: tcod.console.Console) -> None:
+        """
+        Render this state to the given console.
+        """
+        raise NotImplementedError()
+    
+    def handle_event(self, event: tcod.event.Event):
+        """
+        Handle the given user input event.
+        """
+        raise NotImplementedError()
+        
+class PlayingState(GameState):
+    """
+    State for playing the game.
+    
+    Walk around as an @.
+    """
+    
+    def render_to(self, console: tcod.console.Console):
+        console.draw_frame(0, 0, console.width, console.height, "Super RPG 640x480")
+        console.print(1, 1, "Hello World")
+        
+    def handle_event(self, event: tcod.event.Event):
+        pass
+
+def force_min_size(context: tcod.context.Context) -> None:
     """
     Force the window to be at least a minimum size.
     """
@@ -17,17 +50,23 @@ def main() -> None:
     )
     tcod.tileset.procedural_block_elements(tileset=tileset)
     
+    state = PlayingState()
+    
     with tcod.context.new(tileset=tileset) as context:
         force_min_size(context)
         width, height = context.recommended_console_size()
         console = tcod.console.Console(width, height)
         
         while True: 
-            console.draw_frame(0, 0, console.width, console.height, "Super RPG 640x480")
-            console.print(1, 1, "Hello World")
+            # Main loop
             
+            # Render the current game state
+            state.render_to(console)
+            
+            # Show that
             context.present(console, keep_aspect=True)
             
+            # Handle events
             for event in tcod.event.wait():
                 if isinstance(event, tcod.event.Quit):
                     raise SystemExit()
@@ -35,6 +74,9 @@ def main() -> None:
                     force_min_size(context)
                     width, height = context.recommended_console_size()
                     console = tcod.console.Console(width, height)
+                else:
+                    # Other events are probably input so let the game state deal with them.
+                    state.handle_event(event)
                     
 
 if __name__ == "__main__":
