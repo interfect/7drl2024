@@ -1,10 +1,7 @@
 root ::= RoguelikeObject
 RoguelikeObject ::= (
     "{" line
-    "\"type\": " q itemType q and
     "\"rarity\": " q rarityLevel q and
-    "\"quality\": " q qualityLevel q and
-    "\"cursed\": " boolean and
     "\"domain\": " q elementalDomain q and
     "\"name\": " title and
     "\"symbol\": " char and

@@ -49,15 +49,13 @@ class Generator:
     
     def invent_object(self) -> dict:
         example = random.choice([
-            "cat",
-            "dog",
-            "unruly pub patron",
-            "stick",
+            "boring wall",
+            "portcullis",
             "moderately large stick",
             "hole in the ground",
             "crushing sense of dread"
         ])
-        return self.invent(f"Here is a JSON object describing an object for my 7DRL roguelike, way better than \"{example}\":\n")
+        return self.invent(f"Here is a JSON object describing an obstacle for my 7DRL roguelike, way better than \"{example}\":\n")
     
     def invent_enemy(self) -> dict:
         example = random.choice([
@@ -165,20 +163,26 @@ class PlayingState(GameState):
         # Make an initial map
         generator = Generator()
         MAP_RANGE = 10
-        for _ in range(random.randrange(5, 7)):
+        object_count = 0
+        desired_object_count = random.randint(5, 7)
+        while object_count < desired_object_count:
             x = random.randint(-MAP_RANGE, MAP_RANGE)
             y = random.randint(-MAP_RANGE, MAP_RANGE)
             if self.object_at(x, y) is None:
                 # Put something here
                 object_type = generator.invent_object()
                 self.objects.append(WorldObject(x, y, object_type["symbol"], object_type["name"]))
+                object_count += 1
         
-        for _ in range(random.randrange(1, 3)):
+        enemy_count = 0
+        desired_enemy_count = random.randint(2, 5)
+        while enemy_count < desired_enemy_count:
             x = random.randint(-MAP_RANGE, MAP_RANGE)
             y = random.randint(-MAP_RANGE, MAP_RANGE)
             if self.object_at(x, y) is None:
                 enemy_type = generator.invent_enemy()
                 self.objects.append(Enemy(x, y, enemy_type["symbol"], enemy_type["name"], int(enemy_type["health"])))
+                enemy_count += 1
                 
                 
         self.log("Hello World")
@@ -327,8 +331,10 @@ def force_min_size(context: tcod.context.Context) -> None:
     context.sdl_window.size = (max(context.sdl_window.size[0], MIN_WINDOW_WIDTH), max(context.sdl_window.size[1], MIN_WINDOW_HEIGHT))
 
 def main() -> None:
+    #FONT="Alloy_curses_12x12.png"
+    FONT="Curses_square_24.png"
     tileset = tcod.tileset.load_tilesheet(
-        "Alloy_curses_12x12.png", columns=16, rows=16, charmap=tcod.tileset.CHARMAP_CP437
+        FONT, columns=16, rows=16, charmap=tcod.tileset.CHARMAP_CP437
     )
     tcod.tileset.procedural_block_elements(tileset=tileset)
     
