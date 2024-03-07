@@ -29,8 +29,9 @@ class Generator:
     
     # This holds a prompt template for each type of object.
     PROMPTS = {
-        "enemy": "Here is a JSON object describing an enemy for my 7DRL roguelike, way better than {}:",
-        "obstacle": "Here is a JSON object describing an obstacle for my 7DRL roguelike, way better than {}:"
+        "enemy": "Here is a JSON object describing an enemy for my 7DRL roguelike, way better than \"{}\":",
+        "obstacle": "Here is a JSON object describing an obstacle for my 7DRL roguelike, way better than \"{}\":",
+        "loot": "Here is a JSON object describing some loot for my 7DRL roguelike, way better than \"{}\":"
     }
     
     # This holds example item types used to vary the prompt.
@@ -47,6 +48,12 @@ class Generator:
             "portcullis",
             "moderately large stick",
             "hole in the ground"
+        ],
+        "loot": [
+            "Excalibur",
+            "pointy rock",
+            "small pile of gold",
+            "portable hole"
         ]
     }
 
@@ -175,6 +182,7 @@ class WorldObject:
         x: int,
         y: int,
         symbol: str = "?",
+        color: str = "#ffffff",
         name: str = "object",
         indefinite_article: Optional[str] = None,
         definite_article: Optional[str] = None,
@@ -186,6 +194,7 @@ class WorldObject:
         self.x = x
         self.y = y
         self.symbol = symbol
+        self.fg = self.hex_to_rgb(color)
         self.name = name
         self.indefinite_article = indefinite_article
         self.definite_article = definite_article
@@ -193,7 +202,15 @@ class WorldObject:
         self.accusative_pronoun = self.NOMINATIVE_TO_ACCUSATIVE[nominative_pronoun]
         self.rarity = rarity
         self.z_layer = z_layer
+    
+    def hex_to_rgb(self, hex_code: str) -> tuple[int, int, int]:
+        """
+        Convert a hex color code with leading # to an RGB tuple out of 255.
         
+        See <https://stackoverflow.com/a/71804445>
+        """
+        return tuple(int(hex_code[i:i+2], 16)  for i in (1, 3, 5))
+    
     def definite_name(self) -> str:
         """
         Get the name of the object formatted with a definite article, if applicable.
@@ -224,10 +241,16 @@ class Enemy(WorldObject):
         
         self.max_health = health
         self.health = health
+        
+        # An enemy can be carrying loot items
+        self.inventory: list[WorldObject] = []
          
 class Player(WorldObject):
     def __init__(self) -> None:
         super().__init__(0, 0, symbol="@", name="Player", z_layer=1)
+        
+        # We collect loot items from enemies
+        self.inventory: list[WorldObject] = []
         
 class PlayingState(GameState):
     """
@@ -274,7 +297,9 @@ class PlayingState(GameState):
             y = random.randint(-MAP_RANGE, MAP_RANGE)
             if self.object_at(x, y) is None:
                 enemy_type = generator.select_object("enemy")
-                self.objects.append(Enemy(x, y, **enemy_type))
+                enemy = Enemy(x, y, **enemy_type)
+                enemy.inventory.append(WorldObject(0, 0, **generator.select_object("loot")))
+                self.objects.append(enemy)
                 enemy_count += 1
                 
                 
@@ -301,7 +326,7 @@ class PlayingState(GameState):
         self.objects.sort(key=lambda o: o.z_layer)
         
         # Compute layout
-        LOG_HEIGHT = 3
+        LOG_HEIGHT = 4
     
         console.clear()
         console.draw_frame(0, 0, console.width, console.height - LOG_HEIGHT, "Super RPG 640x480")
@@ -341,7 +366,7 @@ class PlayingState(GameState):
             x_in_view = to_render.x - view_x
             y_in_view = to_render.y - view_y
             if x_in_view >= 0 and x_in_view < width and y_in_view >= 0 and y_in_view < height:
-                console.print(x_in_view + x, y_in_view + y, to_render.symbol)
+                console.print(x_in_view + x, y_in_view + y, to_render.symbol, fg=to_render.fg)
 
     DIRECTION_KEYS = {
         # Arrow keys
@@ -399,6 +424,13 @@ class PlayingState(GameState):
                         # It is dead now
                         self.objects.remove(obstruction)
                         message += f" You kill {obstruction.accusative_pronoun}!"
+                        
+                        # Take its stuff
+                        loot = random.choice(obstruction.inventory) if len(obstruction.inventory) > 0 else None
+                        if loot is not None:
+                            self.player.inventory.append(loot)
+                            rarity_article = "a" if loot.rarity != "uncomon" else "an"
+                            message += f" You loot {loot.indefinite_name()}, {rarity_article} {loot.rarity} treasure."
                     self.log(message)
                     
                     # Check for winning
@@ -409,10 +441,14 @@ class PlayingState(GameState):
                             break
                     if not has_enemies:
                         self.game_won = True
-                        self.log("All enemies have been defeated! You are victorious!")
+                        self.log("All enemies have been defeated!")
                 else:
                     # The playeer is bumping something.
                     self.log(f"Your path is obstructed by {obstruction.indefinite_name()}!")
+        if isinstance(event, tcod.event.KeyDown) and event.sym == tcod.event.KeySym.ESCAPE:
+            if self.game_won:
+                # Let the user quit at the end
+                raise SystemExit()
         
 
 def force_min_size(context: tcod.context.Context) -> None:

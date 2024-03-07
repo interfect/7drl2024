@@ -1,9 +1,10 @@
 commonProps ::= (
+    "\"symbol\": " char and
+    "\"color\": " lightcolorcode and
     "\"name\": " thingName and
     "\"indefinite_article\": " indefiniteArticle and
     "\"definite_article\": " definiteArticle and
-    "\"nominative_pronoun\": " nominativePronoun and
-    "\"symbol\": " char
+    "\"nominative_pronoun\": " nominativePronoun
 )
 
 line ::= "\n" "    "
@@ -19,14 +20,18 @@ word ::= [a-z] [a-z]*
 
 title ::= q titleword q | q titleword " " titletail q
 titletail ::= titleword | titlemiddleword " " titletail | titleword " " titletail
-titleword ::= [A-Z] [a-z]*
+titleword ::= [A-Z] [a-z] [a-z]* | [B-Z] [a-z]*
 titlemiddleword ::= ([A-Z] [a-z]*) | "of" | "the" | "with" | "for"
 
 definiteArticle ::= q "the" q | "null"
 
-indefiniteArticle ::= q "an" q | q "a" q | "null"
+indefiniteArticle ::= q "an" q | q "a" q | q "some" q | "null"
 
 nominativePronoun ::= q "it" q | q "he" q | q "she" q | q "they" q
+
+colorcode ::= q "#" [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f] q
+
+lightcolorcode ::= q "#" [a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f] q | q "#" [0-9a-f][0-9a-f][a-f][0-9a-f][0-9a-f][0-9a-f] q | q "#" [0-9a-f][0-9a-f][0-9a-f][0-9a-f][a-f][0-9a-f] q
 
 string ::= q ([^"\\]*) q
 

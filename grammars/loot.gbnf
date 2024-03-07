@@ -1,0 +1,7 @@
+root ::= RoguelikePartialItem
+RoguelikePartialItem ::= (
+    line
+    commonProps "\n"
+    "}"
+)
+
