@@ -24,14 +24,14 @@ class Generator:
         "mistral-7b-v0.1.Q4_K_M.gguf": "https://huggingface.co/TheBloke/Mistral-7B-v0.1-GGUF/resolve/main/mistral-7b-v0.1.Q4_K_M.gguf"
     }
 
-    MODEL="tinyllama-1.1b-1t-openorca.Q4_K_M.gguf"
-    #MODEL="mistral-7b-v0.1.Q4_K_M.gguf"
+    #MODEL="tinyllama-1.1b-1t-openorca.Q4_K_M.gguf"
+    MODEL="mistral-7b-v0.1.Q4_K_M.gguf"
     
     # This holds a prompt template for each type of object.
     PROMPTS = {
-        "enemy": "Here is a JSON object describing an enemy for my 7DRL roguelike, way better than \"{}\":",
-        "obstacle": "Here is a JSON object describing an obstacle for my 7DRL roguelike, way better than \"{}\":",
-        "loot": "Here is a JSON object describing some loot for my 7DRL roguelike, way better than \"{}\":"
+        "enemy": "Here is a JSON object describing an enemy for my 7DRL roguelike, way better than \"{}\" from the last game:",
+        "obstacle": "Here is a JSON object describing an obstacle for my 7DRL roguelike, way better than \"{}\" from the last game:",
+        "loot": "Here is a JSON object describing a loot item for my 7DRL roguelike, way better than \"{}\" from the last game:"
     }
     
     # This holds example item types used to vary the prompt.
@@ -101,7 +101,7 @@ class Generator:
         prompt = self.PROMPTS[object_type].format(random.choice(self.EXAMPLES[object_type]))
         
         # Add any existing keys, leaving off the closing brace and adding a trailing comma
-        prompt += json.dumps(features, indent=2)[:-1].rstrip() + "," if len(features) > 0 else ""
+        prompt += "\n\n```\n" + json.dumps(features, indent=2)[:-1].rstrip() + "," if len(features) > 0 else ""
         
         # Run the model
         result = self.get_model()(prompt, grammar=self.get_grammar(object_type), stop=["\n\n"], max_tokens=-1, mirostat_mode=2)
@@ -177,6 +177,20 @@ class WorldObject:
         "they": "them"
     }
     
+    HAS_HAVE = {
+        "it": "has",
+        "he": "has",
+        "she": "has",
+        "they": "have"
+    }
+    
+    IS_ARE = {
+        "it": "is",
+        "he": "is",
+        "she": "is",
+        "they": "are"
+    }
+    
     def __init__(
         self,
         x: int,
@@ -200,6 +214,8 @@ class WorldObject:
         self.definite_article = definite_article
         self.nominative_pronoun = nominative_pronoun
         self.accusative_pronoun = self.NOMINATIVE_TO_ACCUSATIVE[nominative_pronoun]
+        self.has_have = self.HAS_HAVE[nominative_pronoun]
+        self.is_are = self.IS_ARE[nominative_pronoun]
         self.rarity = rarity
         self.z_layer = z_layer
     
@@ -231,6 +247,7 @@ class WorldObject:
             parts.append(self.indefinite_article)
         parts.append(self.name)
         return " ".join(parts)
+        
         
 class Enemy(WorldObject):
     """
@@ -341,7 +358,8 @@ class PlayingState(GameState):
             if log_count > 1:
                 # Duplicate messages are expressed with counts
                 log_message += f" x{log_count}"
-            log_start_height += console.print_box(0, log_start_height, console.width, LOG_HEIGHT, log_message)
+            console.print(0, log_start_height, "•")
+            log_start_height += console.print_box(1, log_start_height, console.width, LOG_HEIGHT, log_message)
             if log_start_height >= console.height:
                 break
                 
@@ -417,21 +435,22 @@ class PlayingState(GameState):
                     # Time to fight!
                     damage = random.randint(1, 10)
                     obstruction.health -= damage
-                    message = f"You attack {obstruction.definite_name()} for {damage} damage!"
+                    hit_message = f"You attack {obstruction.definite_name()} for {damage} damage!"
                     if obstruction.health > 0:
-                        message += f" Now {obstruction.nominative_pronoun} has {obstruction.health}/{obstruction.max_health} HP."
+                        hit_message += f" Now {obstruction.nominative_pronoun} {obstruction.has_have} {obstruction.health}/{obstruction.max_health} HP."
+                        self.log(hit_message)
                     else:
                         # It is dead now
                         self.objects.remove(obstruction)
-                        message += f" You kill {obstruction.accusative_pronoun}!"
+                        hit_message += f" You kill {obstruction.accusative_pronoun}!"
+                        self.log(hit_message)
                         
                         # Take its stuff
                         loot = random.choice(obstruction.inventory) if len(obstruction.inventory) > 0 else None
                         if loot is not None:
                             self.player.inventory.append(loot)
                             rarity_article = "a" if loot.rarity != "uncomon" else "an"
-                            message += f" You loot {loot.indefinite_name()}, {rarity_article} {loot.rarity} treasure."
-                    self.log(message)
+                            self.log(f"You loot {loot.indefinite_name()}, {rarity_article} {loot.rarity} treasure.")
                     
                     # Check for winning
                     has_enemies = False
