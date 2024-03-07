@@ -1,0 +1,7 @@
+root ::= RoguelikePartialObstacle
+RoguelikePartialObstacle ::= (
+    line
+    commonProps "\n"
+    "}"
+)
+

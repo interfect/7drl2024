@@ -1,0 +1,39 @@
+commonProps ::= (
+    "\"name\": " thingName and
+    "\"indefinite_article\": " indefiniteArticle and
+    "\"definite_article\": " definiteArticle and
+    "\"nominative_pronoun\": " nominativePronoun and
+    "\"symbol\": " char
+)
+
+line ::= "\n" "    "
+and ::= "," line
+
+q ::= "\""
+ws ::= [ \t\n]*
+
+thingName ::= fewWords | title
+
+fewWords ::= word | word " " word | word " " word " " word
+word ::= [a-z] [a-z]*
+
+title ::= q titleword q | q titleword " " titletail q
+titletail ::= titleword | titlemiddleword " " titletail | titleword " " titletail
+titleword ::= [A-Z] [a-z]*
+titlemiddleword ::= ([A-Z] [a-z]*) | "of" | "the" | "with" | "for"
+
+definiteArticle ::= q "the" q | "null"
+
+indefiniteArticle ::= q "an" q | q "a" q | "null"
+
+nominativePronoun ::= q "it" q | q "he" q | q "she" q | q "they" q
+
+string ::= q ([^"\\]*) q
+
+char ::= q quotedchar q
+quotedchar ::= [-a-zA-Z0-9.,/#!$%^&*;:{}=_`~()@+?><[\]+'] | "\\\"" | "\\\\"
+
+boolean ::= "true" | "false"
+number ::= [0-9]+ "."? [0-9]*
+int ::= [0-9]+
+percent ::= "100" | [1-9][0-9] | [0-9]

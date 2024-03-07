@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-import tcod
+import tcod.libtcodpy
 import tcod.console
 import tcod.context
 import tcod.event
@@ -26,46 +26,117 @@ class Generator:
 
     MODEL="tinyllama-1.1b-1t-openorca.Q4_K_M.gguf"
     #MODEL="mistral-7b-v0.1.Q4_K_M.gguf"
-
-    def __init__(self):
-        self.grammar = LlamaGrammar.from_string(open("./rogue.gbnf").read())
-
-        if not os.path.exists(self.MODEL):
-            print("Download model")
-            urlretrieve(self.MODEL_URLS[self.MODEL], self.MODEL)
     
-        print("Load model")
-        self.model = Llama(
-            model_path=self.MODEL,
-        )
-        print("Model loaded")
-        
-        
-    def invent(self, prompt: str) -> dict:
-        result = self.model(prompt, grammar=self.grammar, stop=["\n\n"], max_tokens=-1, mirostat_mode=2)
-        generated = json.loads(result["choices"][0]["text"])
-        print(f"Invented: {generated}")
-        return generated
+    # This holds a prompt template for each type of object.
+    PROMPTS = {
+        "enemy": "Here is a JSON object describing an enemy for my 7DRL roguelike, way better than {}:",
+        "obstacle": "Here is a JSON object describing an obstacle for my 7DRL roguelike, way better than {}:"
+    }
     
-    def invent_object(self) -> dict:
-        example = random.choice([
-            "boring wall",
-            "portcullis",
-            "moderately large stick",
-            "hole in the ground",
-            "crushing sense of dread"
-        ])
-        return self.invent(f"Here is a JSON object describing an obstacle for my 7DRL roguelike, way better than \"{example}\":\n")
-    
-    def invent_enemy(self) -> dict:
-        example = random.choice([
+    # This holds example item types used to vary the prompt.
+    EXAMPLES = {
+        "enemy": [
             "dire cat",
             "evil stick",
             "boss",
             "really cool guy who doesn't affraid of anything",
             "nasal demon"
-        ])
-        return self.invent(f"Here is a JSON object describing an enemy for my 7DRL roguelike, way better than \"{example}\":\n")
+        ],
+        "obstacle": [
+            "boring wall",
+            "portcullis",
+            "moderately large stick",
+            "hole in the ground"
+        ]
+    }
+
+    def __init__(self) -> None:
+        """
+        Make a new generator, which is responsible for remembering and producing object types.
+        """
+        
+        # We lazily load special grammars for each type of object
+        self.grammars: dict[str, LlamaGrammar] = {}
+        # And we lazily load the model to generate new things
+        self.model: Optional[Llama] = None
+        
+    def get_model(self) -> Llama:
+        """
+        Get the model to generate with.
+        """
+        if self.model is None:
+            if not os.path.exists(self.MODEL):
+                print("Download model")
+                urlretrieve(self.MODEL_URLS[self.MODEL], self.MODEL)
+        
+            print("Load model")
+            self.model = Llama(
+                model_path=self.MODEL,
+            )
+        return self.model
+        
+    def get_grammar(self, object_type: str) -> LlamaGrammar:
+        """
+        Get the grammar to use to generate the given type of object.
+        """
+        if object_type not in self.grammars:
+            object_grammar = open(os.path.join("grammars", f"{object_type}.gbnf")).read()
+            common_grammar = open(os.path.join("grammars", "common.gbnf")).read()
+            self.grammars[object_type] = LlamaGrammar.from_string("\n".join([object_grammar, common_grammar]))
+        return self.grammars[object_type]
+    
+    def invent_object(self, object_type: str, **features) -> dict:
+        """
+        Generate a new, never-before-seen object of the given type, with the given parameters.
+        """
+        
+        # Get a prompt with a random example in it
+        prompt = self.PROMPTS[object_type].format(random.choice(self.EXAMPLES[object_type]))
+        
+        # Add any existing keys, leaving off the closing brace and adding a trailing comma
+        prompt += json.dumps(features, indent=2)[:-1].rstrip() + "," if len(features) > 0 else ""
+        
+        # Run the model
+        result = self.get_model()(prompt, grammar=self.get_grammar(object_type), stop=["\n\n"], max_tokens=-1, mirostat_mode=2)
+        
+        # Load up whatever keys it came up with
+        new_keys = json.loads("{" + result["choices"][0]["text"])
+        
+        # Combine the keys together
+        obj = dict(features)
+        obj.update(new_keys)
+        print(f"Invented: {obj}")
+        return obj
+        
+        
+    def select_object(self, object_type: str) -> dict:
+        """
+        Get a dict defining an object of the given type.
+        
+        All types have "symbol", "name", "definite_article", and "indefinite_article".
+        
+        "enemy": additionally has "health"
+        
+        "obstacle": has no additional fields. 
+        """
+        
+        # We maintain a database of objects by type and rarity
+        rarity = random.choice(["common"] * 10 + ["uncomon"] * 3 + ["rare"])
+        
+        # Within each we have 10 types
+        type_num = random.randrange(0, 10)
+        
+        # Where should that file be?
+        path = os.path.join("objects", object_type, rarity, f"{type_num}.json")
+        if not os.path.exists(path):
+            # Make directory
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            # Invent the object type
+            obj = self.invent_object(object_type, rarity=rarity)
+            # And save it
+            json.dump(obj, open(path, 'w'))
+        
+        return json.load(open(path))
 
 class GameState:
     """
@@ -91,50 +162,72 @@ class WorldObject:
     """
     Represents an object in the world.
     """
-    def __init__(self, x: int, y: int, symbol: str, name: str = "object", z_layer: int = 0) -> None:
+    
+    NOMINATIVE_TO_ACCUSATIVE = {
+        "it": "it",
+        "he": "him",
+        "she": "her",
+        "they": "them"
+    }
+    
+    def __init__(
+        self,
+        x: int,
+        y: int,
+        symbol: str = "?",
+        name: str = "object",
+        indefinite_article: Optional[str] = None,
+        definite_article: Optional[str] = None,
+        nominative_pronoun: str = "it",
+        rarity: str = "common",
+        z_layer: int = 0
+    ) -> None:
+        
         self.x = x
         self.y = y
         self.symbol = symbol
         self.name = name
+        self.indefinite_article = indefinite_article
+        self.definite_article = definite_article
+        self.nominative_pronoun = nominative_pronoun
+        self.accusative_pronoun = self.NOMINATIVE_TO_ACCUSATIVE[nominative_pronoun]
+        self.rarity = rarity
         self.z_layer = z_layer
         
     def definite_name(self) -> str:
         """
         Get the name of the object formatted with a definite article, if applicable.
         """
-        return f"the {self.name}"
+        parts = []
+        if self.definite_article:
+            parts.append(self.definite_article)
+        parts.append(self.name)
+        return " ".join(parts)
     
     def indefinite_name(self) -> str:
         """
         Get the name of the object formatted with an indefinite article, if applicable.
         """
-        VOWELS = "aeiou"
-        if self.name.lower()[0] in VOWELS:
-            article = "an"
-        else:
-            article = "a"
-        return f"{article} {self.name}"
         
-    def nominative_pronoun(self) -> str:
-        """
-        Get the nominative pronoun to refer to the object.
-        """
-        
-        return "it"
+        parts = []
+        if self.indefinite_article:
+            parts.append(self.indefinite_article)
+        parts.append(self.name)
+        return " ".join(parts)
         
 class Enemy(WorldObject):
     """
     Represents an enemy that can be attacked.
     """
-    def __init__(self, x: int, y: int, symbol: str, name: str = "enemy", health: int = 10):
-        super().__init__(x, y, symbol, name)
+    def __init__(self, x: int, y: int, health: int = 10, **kwargs):
+        super().__init__(x, y, **kwargs)
         
         self.max_health = health
         self.health = health
          
 class Player(WorldObject):
     def __init__(self) -> None:
-        super().__init__(0, 0, "@", "Player", z_layer=1)
+        super().__init__(0, 0, symbol="@", name="Player", z_layer=1)
         
 class PlayingState(GameState):
     """
@@ -170,8 +263,8 @@ class PlayingState(GameState):
             y = random.randint(-MAP_RANGE, MAP_RANGE)
             if self.object_at(x, y) is None:
                 # Put something here
-                object_type = generator.invent_object()
-                self.objects.append(WorldObject(x, y, object_type["symbol"], object_type["name"]))
+                object_type = generator.select_object("obstacle")
+                self.objects.append(WorldObject(x, y, **object_type))
                 object_count += 1
         
         enemy_count = 0
@@ -180,8 +273,8 @@ class PlayingState(GameState):
             x = random.randint(-MAP_RANGE, MAP_RANGE)
             y = random.randint(-MAP_RANGE, MAP_RANGE)
             if self.object_at(x, y) is None:
-                enemy_type = generator.invent_enemy()
-                self.objects.append(Enemy(x, y, enemy_type["symbol"], enemy_type["name"], int(enemy_type["health"])))
+                enemy_type = generator.select_object("enemy")
+                self.objects.append(Enemy(x, y, **enemy_type))
                 enemy_count += 1
                 
                 
@@ -232,7 +325,7 @@ class PlayingState(GameState):
         if self.game_won:
             # Print a big victory banner
             console.draw_frame(console.width // 2 - BANNER_WIDTH // 2, console.height // 2 - BANNER_HEIGHT // 2, BANNER_WIDTH, BANNER_HEIGHT, decoration="╔═╗║ ║╚═╝", fg=(0, 255, 0))
-            console.print_box(console.width // 2 - BANNER_WIDTH // 2 + 1, console.height // 2 - BANNER_HEIGHT // 2 + 1, BANNER_WIDTH - 2, BANNER_HEIGHT - 2, "You Win!", fg=(0, 255, 0), alignment=tcod.CENTER)
+            console.print_box(console.width // 2 - BANNER_WIDTH // 2 + 1, console.height // 2 - BANNER_HEIGHT // 2 + 1, BANNER_WIDTH - 2, BANNER_HEIGHT - 2, "You Win!", fg=(0, 255, 0), alignment=tcod.libtcodpy.CENTER)
             
         
     def draw_world(self, console: tcod.console.Console, x: int, y: int, width: int, height: int) -> None:
@@ -301,11 +394,11 @@ class PlayingState(GameState):
                     obstruction.health -= damage
                     message = f"You attack {obstruction.definite_name()} for {damage} damage!"
                     if obstruction.health > 0:
-                        message += f" Now {obstruction.nominative_pronoun()} has {obstruction.health}/{obstruction.max_health} HP."
+                        message += f" Now {obstruction.nominative_pronoun} has {obstruction.health}/{obstruction.max_health} HP."
                     else:
                         # It is dead now
                         self.objects.remove(obstruction)
-                        message += f" You kill {obstruction.nominative_pronoun()}!"
+                        message += f" You kill {obstruction.accusative_pronoun}!"
                     self.log(message)
                     
                     # Check for winning
@@ -329,6 +422,17 @@ def force_min_size(context: tcod.context.Context) -> None:
     MIN_WINDOW_WIDTH = 640
     MIN_WINDOW_HEIGHT = 480
     context.sdl_window.size = (max(context.sdl_window.size[0], MIN_WINDOW_WIDTH), max(context.sdl_window.size[1], MIN_WINDOW_HEIGHT))
+    
+def force_normal_shape(context: tcod.context.Context) -> None:
+    """
+    Force the window to be a sensible shape.
+    """
+    # Don't make it skinnier than 2 to 1 in any dimension
+    if context.sdl_window.size[0] / context.sdl_window.size[1] > 2:
+        context.sdl_window.size = (2 * context.sdl_window.size[1], context.sdl_window.size[1])
+    if context.sdl_window.size[1] / context.sdl_window.size[0] > 2:
+        context.sdl_window.size = (context.sdl_window.size[0], 2 * context.sdl_window.size[0])
+        
 
 def main() -> None:
     #FONT="Alloy_curses_12x12.png"
@@ -341,6 +445,7 @@ def main() -> None:
     state = PlayingState()
     
     with tcod.context.new(tileset=tileset) as context:
+        force_normal_shape(context)
         force_min_size(context)
         width, height = context.recommended_console_size()
         console = tcod.console.Console(width, height)

@@ -1,0 +1,7 @@
+root ::= RoguelikePartialEnemy
+RoguelikePartialEnemy ::= (
+    line
+    commonProps and
+    "\"health\": " percent "\n"
+    "}"
+)
