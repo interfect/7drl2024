@@ -12,12 +12,13 @@ from llama_cpp import Llama, LlamaGrammar
 
 import json
 import os
+import types
 import random
 
-from typing import Optional
+from typing import Optional, Generator
 from urllib.request import urlretrieve
 
-class Generator:
+class ProceduralGenerator:
     
     MODEL_URLS = {
         "tinyllama-1.1b-1t-openorca.Q4_K_M.gguf": "https://huggingface.co/TheBloke/TinyLlama-1.1B-1T-OpenOrca-GGUF/resolve/main/tinyllama-1.1b-1t-openorca.Q4_K_M.gguf",
@@ -158,9 +159,11 @@ class GameState:
         """
         raise NotImplementedError()
     
-    def handle_event(self, event: tcod.event.Event) -> None:
+    def handle_event(self, event: tcod.event.Event) -> Optional["GameState"]:
         """
         Handle the given user input event.
+        
+        Returns the next state, or None to keep the current state.
         """
         raise NotImplementedError()
         
@@ -269,59 +272,69 @@ class Player(WorldObject):
         # We collect loot items from enemies
         self.inventory: list[WorldObject] = []
         
-class PlayingState(GameState):
+class GameWorld:
     """
-    State for playing the game.
+    World of the game.
     
-    Walk around as an @.
+    Holds the player and also the other things on the level.
     """
     
     def __init__(self) -> None:
         """
-        Set up a fresh game state.
+        Set up a fresh world.
         """
-        
-        # Set to true to trigger victory screen
-        self.game_won = False
         
         # Hang on to the player specifically
         self.player = Player()
         
         # But put them in the list of all point objects.
         self.objects = [self.player]
+    
+    @types.coroutine    
+    def generate_level(self, generator: ProceduralGenerator) -> Generator[tuple[int, int, str], None, None]:
+        """
+        Make a level to play. Structured as a coroutine; level is done when it stops.
         
-        # Keep track of log messages and their counts
-        self.logs: list[tuple[str, int]] = []
+        It yields progress tuples of completed out of total, and progress message.
+        """
+        
+        # Throw out the old objects, except the player who is here
+        self.objects = [self.player]
+        # Put the player at the origin
+        self.player.x = 0
+        self.player.y = 0
         
         # Make an initial map
-        generator = Generator()
         MAP_RANGE = 10
+        
         object_count = 0
         desired_object_count = random.randint(5, 7)
+        yield (object_count, desired_object_count, "Making objects")
         while object_count < desired_object_count:
             x = random.randint(-MAP_RANGE, MAP_RANGE)
             y = random.randint(-MAP_RANGE, MAP_RANGE)
             if self.object_at(x, y) is None:
                 # Put something here
                 object_type = generator.select_object("obstacle")
-                self.objects.append(WorldObject(x, y, **object_type))
+                self.add_object(WorldObject(x, y, **object_type))
                 object_count += 1
+                yield (object_count, desired_object_count, "Making objects")
         
         enemy_count = 0
         desired_enemy_count = random.randint(2, 5)
+        yield (enemy_count, desired_enemy_count, "Making enemies")
         while enemy_count < desired_enemy_count:
             x = random.randint(-MAP_RANGE, MAP_RANGE)
             y = random.randint(-MAP_RANGE, MAP_RANGE)
             if self.object_at(x, y) is None:
                 enemy_type = generator.select_object("enemy")
                 enemy = Enemy(x, y, **enemy_type)
+                yield (enemy_count, desired_enemy_count, "Making enemies")
                 enemy.inventory.append(WorldObject(0, 0, **generator.select_object("loot")))
-                self.objects.append(enemy)
+                self.add_object(enemy)
                 enemy_count += 1
-                
-                
-        self.log("Hello World")
-            
+                yield (enemy_count, desired_enemy_count, "Making enemies")
+    
     def object_at(self, x: int, y: int) -> Optional[WorldObject]:
         """
         Get the object at the given coordinates, or None.
@@ -331,17 +344,79 @@ class PlayingState(GameState):
                 return obj
         return None
         
+    def has_enemies(self) -> bool:
+        """
+        Return True if any enemies are left.
+        """
+        for obj in self.objects:
+            if isinstance(obj, Enemy):
+                return True
+        return False
+        
+    def remove_object(self, obj: WorldObject) -> None:
+        """
+        Remove the given object from the world.
+        """
+        
+        self.objects.remove(obj)
+        
+    def add_object(self, obj: WorldObject) -> None:
+        """
+        Add the given object to the world.
+        """
+        
+        self.objects.append(obj)
+        
+    def draw(self, console: tcod.console.Console, x: int, y: int, width: int, height: int) -> None:
+        """
+        Draw the world centere don the player into a region of the given console.
+        """
+        
+        # Make sure higher-Z objects draw on top
+        self.objects.sort(key=lambda o: o.z_layer)
+        
+        # Find where to put the view upper left corner to center the player
+        view_x = self.player.x - width // 2
+        view_y = self.player.y - height // 2
+        
+        for to_render in self.objects:
+            x_in_view = to_render.x - view_x
+            y_in_view = to_render.y - view_y
+            if x_in_view >= 0 and x_in_view < width and y_in_view >= 0 and y_in_view < height:
+                console.print(x_in_view + x, y_in_view + y, to_render.symbol, fg=to_render.fg)
+        
+        
+class PlayingState(GameState):
+    """
+    State for playing the game.
+    
+    Walk around as an @.
+    """
+    
+    def __init__(self, world: GameWorld) -> None:
+        """
+        Set up a fresh game state.
+        """
+        
+        # Keep the world
+        self.world = world
+        
+        # Keep track of log messages and their counts
+        self.logs: list[tuple[str, int]] = []
+                
+        self.log("Hello World")
+        
     def log(self, message: str) -> None:
+        """
+        Store a message to the log of game event messages.
+        """
         if len(self.logs) > 0 and self.logs[-1][0] == message:
             # A duplicate. Increase the count.
             self.logs[-1] = (self.logs[-1][0], self.logs[-1][1] + 1)
         else:
             self.logs.append((message, 1))
     
-    def render_to(self, console: tcod.console.Console) -> None:
-        # Make sure higher-Z objects draw on top
-        self.objects.sort(key=lambda o: o.z_layer)
-        
+    def render_to(self, console: tcod.console.Console) -> None:       
         # Compute layout
         LOG_HEIGHT = 4
     
@@ -349,7 +424,7 @@ class PlayingState(GameState):
         console.draw_frame(0, 0, console.width, console.height - LOG_HEIGHT, "Super RPG 640x480")
         
         # Draw a world view inset in the frame
-        self.draw_world(console, 1, 1, console.width - 2, console.height - LOG_HEIGHT - 2)
+        self.world.draw(console, 1, 1, console.width - 2, console.height - LOG_HEIGHT - 2)
         
         # Draw the log messages
         log_start_height = console.height - LOG_HEIGHT
@@ -362,30 +437,7 @@ class PlayingState(GameState):
             log_start_height += console.print_box(1, log_start_height, console.width, LOG_HEIGHT, log_message)
             if log_start_height >= console.height:
                 break
-                
-        BANNER_WIDTH = 20
-        BANNER_HEIGHT = 3
-        if self.game_won:
-            # Print a big victory banner
-            console.draw_frame(console.width // 2 - BANNER_WIDTH // 2, console.height // 2 - BANNER_HEIGHT // 2, BANNER_WIDTH, BANNER_HEIGHT, decoration="╔═╗║ ║╚═╝", fg=(0, 255, 0))
-            console.print_box(console.width // 2 - BANNER_WIDTH // 2 + 1, console.height // 2 - BANNER_HEIGHT // 2 + 1, BANNER_WIDTH - 2, BANNER_HEIGHT - 2, "You Win!", fg=(0, 255, 0), alignment=tcod.libtcodpy.CENTER)
             
-        
-    def draw_world(self, console: tcod.console.Console, x: int, y: int, width: int, height: int) -> None:
-        """
-        Draw the world into a region of the given console.
-        """
-        
-        # Find where to put the view upper left corner to center the player
-        view_x = self.player.x - width // 2
-        view_y = self.player.y - height // 2
-        
-        for to_render in self.objects:
-            x_in_view = to_render.x - view_x
-            y_in_view = to_render.y - view_y
-            if x_in_view >= 0 and x_in_view < width and y_in_view >= 0 and y_in_view < height:
-                console.print(x_in_view + x, y_in_view + y, to_render.symbol, fg=to_render.fg)
-
     DIRECTION_KEYS = {
         # Arrow keys
         KeySym.LEFT: (-1, 0),
@@ -417,57 +469,104 @@ class PlayingState(GameState):
         KeySym.n: (1, 1),
     }
     
-    def handle_event(self, event: tcod.event.Event) -> None:
+    def handle_event(self, event: tcod.event.Event) -> Optional[GameState]:
         if isinstance(event, tcod.event.KeyDown) and event.sym in self.DIRECTION_KEYS:
-            if not self.game_won:
-                # The player wants to move.
-                direction = self.DIRECTION_KEYS[event.sym]
-                
-                next_x = self.player.x + direction[0]
-                next_y = self.player.y + direction[1]
-                
-                obstruction = self.object_at(next_x, next_y)
-                if obstruction is None:
-                    # You can just move there
-                    self.player.x = next_x
-                    self.player.y = next_y
-                elif isinstance(obstruction, Enemy):
-                    # Time to fight!
-                    damage = random.randint(1, 10)
-                    obstruction.health -= damage
-                    hit_message = f"You attack {obstruction.definite_name()} for {damage} damage!"
-                    if obstruction.health > 0:
-                        hit_message += f" Now {obstruction.nominative_pronoun} {obstruction.has_have} {obstruction.health}/{obstruction.max_health} HP."
-                        self.log(hit_message)
-                    else:
-                        # It is dead now
-                        self.objects.remove(obstruction)
-                        hit_message += f" You kill {obstruction.accusative_pronoun}!"
-                        self.log(hit_message)
-                        
-                        # Take its stuff
-                        loot = random.choice(obstruction.inventory) if len(obstruction.inventory) > 0 else None
-                        if loot is not None:
-                            self.player.inventory.append(loot)
-                            rarity_article = "a" if loot.rarity != "uncomon" else "an"
-                            self.log(f"You loot {loot.indefinite_name()}, {rarity_article} {loot.rarity} treasure.")
-                    
-                    # Check for winning
-                    has_enemies = False
-                    for obj in self.objects:
-                        if isinstance(obj, Enemy):
-                            has_enemies = True
-                            break
-                    if not has_enemies:
-                        self.game_won = True
-                        self.log("All enemies have been defeated!")
+            # The player wants to move.
+            direction = self.DIRECTION_KEYS[event.sym]
+            
+            next_x = self.world.player.x + direction[0]
+            next_y = self.world.player.y + direction[1]
+            
+            obstruction = self.world.object_at(next_x, next_y)
+            if obstruction is None:
+                # You can just move there
+                self.world.player.x = next_x
+                self.world.player.y = next_y
+            elif isinstance(obstruction, Enemy):
+                # Time to fight!
+                damage = random.randint(1, 10)
+                obstruction.health -= damage
+                hit_message = f"You attack {obstruction.definite_name()} for {damage} damage!"
+                if obstruction.health > 0:
+                    hit_message += f" Now {obstruction.nominative_pronoun} {obstruction.has_have} {obstruction.health}/{obstruction.max_health} HP."
+                    self.log(hit_message)
                 else:
-                    # The playeer is bumping something.
-                    self.log(f"Your path is obstructed by {obstruction.indefinite_name()}!")
+                    # It is dead now
+                    self.world.remove_object(obstruction)
+                    hit_message += f" You kill {obstruction.accusative_pronoun}!"
+                    self.log(hit_message)
+                    
+                    # Take its stuff
+                    loot = random.choice(obstruction.inventory) if len(obstruction.inventory) > 0 else None
+                    if loot is not None:
+                        self.world.player.inventory.append(loot)
+                        rarity_article = "a" if loot.rarity != "uncomon" else "an"
+                        self.log(f"You loot {loot.indefinite_name()}, {rarity_article} {loot.rarity} treasure.")
+                
+                # Check for winning
+                if not self.world.has_enemies():
+                    self.log("All enemies have been defeated!")
+                    # Go to a victory state
+                    return VictoryState(self.world, self.logs)
+            else:
+                # The player is bumping something.
+                self.log(f"Your path is obstructed by {obstruction.indefinite_name()}!")
+        
+        # Don't change state by default
+        return None
+                
+class VictoryState(PlayingState):
+    """
+    Acts like the normal in-game state, but you can't play and it shows a victory banner.
+    """
+    
+    def __init__(self, world: GameWorld, logs: list[tuple[str, int]]) -> None:
+        super().__init__(world)
+        # Keep the passed-in logs
+        self.logs += logs
+    
+    def render_to(self, console: tcod.console.Console) -> None:
+        # First draw as normal
+        super().render_to(console)
+        
+        # Then draw a big victory banner
+        BANNER_WIDTH = 20
+        BANNER_HEIGHT = 3
+        banner_x = console.width // 2 - BANNER_WIDTH // 2
+        banner_y = console.height // 2 - BANNER_HEIGHT // 2
+        console.draw_frame(banner_x, banner_y, BANNER_WIDTH, BANNER_HEIGHT, decoration="╔═╗║ ║╚═╝", fg=(0, 255, 0))
+        console.print_box(banner_x + 1, banner_y + 1, BANNER_WIDTH - 2, BANNER_HEIGHT - 2, "You Win!", fg=(0, 255, 0), alignment=tcod.libtcodpy.CENTER)
+    
+    def handle_event(self, event: tcod.event.Event) -> Optional[GameState]:
         if isinstance(event, tcod.event.KeyDown) and event.sym == tcod.event.KeySym.ESCAPE:
-            if self.game_won:
-                # Let the user quit at the end
-                raise SystemExit()
+            # Let the user quit at the end
+            raise SystemExit()
+        # Don't change state by default
+        return None
+        
+class LoadingState(GameState):
+    """
+    State for loading the game.
+    """
+    
+    def __init__(self):
+        self.world = GameWorld()
+        self.process = self.world.generate_level(ProceduralGenerator())
+        self.progress = (0, 0, "Loading")
+    
+    def render_to(self, console: tcod.console.Console) -> None:
+        console.clear()
+        console.print_box(0, 0, console.width, console.height, f"Loading: {self.progress[2]} ({self.progress[0]}/{self.progress[1]})")
+    
+    def handle_event(self, event: tcod.event.Event) -> Optional[GameState]:
+        # Make progress
+        try:
+            self.progress = self.process.send(None)
+            print(f"Progress: {self.progress}")
+        except StopIteration:
+            # Now it is done
+            return PlayingState(self.world)
+        
         
 
 def force_min_size(context: tcod.context.Context) -> None:
@@ -497,7 +596,7 @@ def main() -> None:
     )
     tcod.tileset.procedural_block_elements(tileset=tileset)
     
-    state = PlayingState()
+    state = LoadingState()
     
     with tcod.context.new(tileset=tileset) as context:
         force_normal_shape(context)
@@ -517,7 +616,7 @@ def main() -> None:
             context.present(console, keep_aspect=True)
             
             # Handle events
-            for event in tcod.event.wait():
+            for event in tcod.event.wait(timeout=0.1):
                 if isinstance(event, tcod.event.Quit):
                     raise SystemExit()
                 elif isinstance(event, tcod.event.WindowResized):
@@ -528,7 +627,10 @@ def main() -> None:
                         last_window_size = context.sdl_window.size
                 else:
                     # Other events are probably input so let the game state deal with them.
-                    state.handle_event(event)
+                    next_state = state.handle_event(event)
+                    if next_state is not None:
+                        # Adopt the next state
+                        state = next_state
                     
 
 if __name__ == "__main__":
