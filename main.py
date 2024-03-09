@@ -4,6 +4,7 @@ import tcod.libtcodpy
 import tcod.console
 import tcod.context
 import tcod.event
+import tcod.image
 import tcod.tileset
 
 from tcod.event import KeySym
@@ -11,6 +12,7 @@ from tcod.event import KeySym
 from llama_cpp import Llama, LlamaGrammar
 
 import json
+import math
 import os
 import sys
 import types
@@ -21,6 +23,8 @@ from queue import Queue, Empty
 from threading import Thread, Lock
 from typing import Optional, Generator
 from urllib.request import urlopen
+
+GAME_NAME = "False Ghost"
 
 class ProceduralGenerator:
     
@@ -83,20 +87,22 @@ class ProceduralGenerator:
         source_url = self.MODEL_URLS[self.MODEL]
         dest_path = self.MODEL
         
+        MEGABYTE = 1024 * 1024
+        
         with open(dest_path + ".tmp", "wb") as out_handle:
-            yield (0, 0, f"Download {source_url}")
+            yield (0, 0, f"Download {dest_path}")
             with urlopen(source_url) as handle:
                 expected_length = int(handle.headers.get('Content-Length'))
                 bytes_read = 0
                 while True:
-                    yield (bytes_read, expected_length, f"Download {source_url}")
-                    buffer = handle.read(1024 * 1024)
+                    yield (bytes_read // MEGABYTE, expected_length // MEGABYTE, f"Download {dest_path}")
+                    buffer = handle.read(MEGABYTE)
                     if len(buffer) == 0:
                         # Hit EOF
                         break
                     bytes_read += len(buffer)
                     out_handle.write(buffer)
-                yield (bytes_read, expected_length, f"Download {source_url}")
+                yield (bytes_read // MEGABYTE, expected_length // MEGABYTE, f"Download {dest_path}")
                     
         os.rename(dest_path + ".tmp", dest_path)
                     
@@ -465,7 +471,7 @@ class PlayingState(GameState):
         LOG_HEIGHT = 4
     
         console.clear()
-        console.draw_frame(0, 0, console.width, console.height - LOG_HEIGHT, "Super RPG 640x480")
+        console.draw_frame(0, 0, console.width, console.height - LOG_HEIGHT, GAME_NAME)
         
         # Draw a world view inset in the frame
         self.world.draw(console, 1, 1, console.width - 2, console.height - LOG_HEIGHT - 2)
@@ -602,7 +608,25 @@ class LoadingState(GameState):
     
     def render_to(self, console: tcod.console.Console) -> None:
         console.clear()
-        console.print_box(0, 0, console.width, console.height, f"Loading: {self.progress[2]} ({self.progress[0]}/{self.progress[1]})")
+        console.draw_frame(0, 0, console.width, console.height, "Loading...")
+        
+        bar_box_height = 3
+        bar_box_width = console.width - 4
+        console.draw_frame(2, console.height // 2 - bar_box_height // 2, bar_box_width, bar_box_height, f"{self.progress[0]:n}/{self.progress[1]:n}")
+        bar_width = bar_box_width - 2
+        bar_height = 1
+        
+        # Make a bar of semigraphic characters
+        EMPTY_COLOR = (127, 0, 0)
+        FULL_COLOR = (255, 0, 0)
+        bar_graphic = tcod.image.Image(bar_width * 2, bar_height * 2)
+        bar_graphic.clear(EMPTY_COLOR)
+        bar_filled_px = round(bar_width * 2 * self.progress[0] / self.progress[1]) if self.progress[1] > 0 else 0
+        for x in range(bar_filled_px):
+            for y in range(bar_height * 2):
+                bar_graphic.put_pixel(x, y, FULL_COLOR)
+        console.draw_semigraphics(bar_graphic, 3, console.height // 2 - bar_height // 2)
+        console.print_box(4, console.height // 2 + bar_box_height + 1, console.width - 8, console.height // 2 - bar_box_height - 1, f"{self.progress[2]}", alignment=tcod.libtcodpy.CENTER)
     
     def handle_event(self, event: Optional[tcod.event.Event]) -> Optional[GameState]:
         # Make progress
@@ -680,7 +704,7 @@ def main() -> None:
     # And we want to send exceptions back
     error_queue = Queue()
     
-    with tcod.context.new(tileset=tileset) as context:
+    with tcod.context.new(tileset=tileset, title=GAME_NAME) as context:
         force_normal_shape(context)
         force_min_size(context)
         width, height = context.recommended_console_size()
