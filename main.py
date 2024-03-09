@@ -12,11 +12,13 @@ from llama_cpp import Llama, LlamaGrammar
 
 import json
 import os
+import sys
 import types
 import random
 
-from queue import Queue
-from threading import Thread
+from contextlib import contextmanager
+from queue import Queue, Empty
+from threading import Thread, Lock
 from typing import Optional, Generator
 from urllib.request import urlretrieve
 
@@ -572,7 +574,36 @@ class LoadingState(GameState):
             # Now it is done
             return PlayingState(self.world)
         
+
+class ConsoleManager:
+    """
+    Class to let only one thread work on the tcod console at a time.
+    """
+    
+    def __init__(self, width: int, height: int) -> None:
+        """
+        Make a new ConsoleManager to manage a console.
+        """
+        self.lock = Lock()
+        self.console = tcod.console.Console(width, height)
+    
+    @contextmanager
+    def with_console(self) -> Generator[tcod.console.Console, None, None]:
+        """
+        Get access to the console to draw on or to render.
+        """
+        with self.lock:
+            yield self.console
+    
+    def resize(self, width: int, height: int) -> None:
+        """
+        Change the console size.
         
+        Cannot be called inside with_console.
+        """
+        
+        with self.lock:
+            self.console = tcod.console.Console(width, height)        
 
 def force_min_size(context: tcod.context.Context) -> None:
     """
@@ -591,7 +622,6 @@ def force_normal_shape(context: tcod.context.Context) -> None:
         context.sdl_window.size = (2 * context.sdl_window.size[1], context.sdl_window.size[1])
     if context.sdl_window.size[1] / context.sdl_window.size[0] > 2:
         context.sdl_window.size = (context.sdl_window.size[0], 2 * context.sdl_window.size[0])
-        
 
 def main() -> None:
     #FONT="Alloy_curses_12x12.png"
@@ -604,58 +634,73 @@ def main() -> None:
     # We can't block the event wait loop or Windows will complain we're "not responding".
     # So we get events in one thread and queue them up, and handle them and also render in another thread.
     # The main thread just feeds the OS and the queue.
-    event_queue = Queue()   
+    event_queue = Queue()
+    # And we want to send exceptions back
+    error_queue = Queue()
     
     with tcod.context.new(tileset=tileset) as context:
         force_normal_shape(context)
         force_min_size(context)
         width, height = context.recommended_console_size()
-        console = tcod.console.Console(width, height)
+        console_manager = ConsoleManager(width, height)
         
         def handle_queue():
-            last_window_size = context.sdl_window.size
-            
-            state = LoadingState()
-            
-            while True:
-                # Main game loop
+            try:
+                state = LoadingState()
                 
-                # Render the current game state
-                state.render_to(console)
-            
-                try:
-                    event = queue.get(block=False)
-                except Empty:
-                    event = None
+                while True:
+                    # Main game loop
+                    with console_manager.with_console() as console:
+                        # Render the current game state, while we know the console isn't being put on the screen.
+                        state.render_to(console)
                 
-                if isinstance(event, tcod.event.Quit):
-                    return
-                elif isinstance(event, tcod.event.WindowResized):
-                    if context.sdl_window.size != last_window_size:
-                        force_min_size(context)
-                        width, height = context.recommended_console_size()
-                        console = tcod.console.Console(width, height)
-                        last_window_size = context.sdl_window.size
-                else:
-                    next_state = state.handle_event(event)
+                    try:
+                        event = event_queue.get(timeout=0.1)
+                    except Empty:
+                        event = None
+                    
+                    if isinstance(event, tcod.event.Quit):
+                        return
+                    else:
+                        next_state = state.handle_event(event)
                         if next_state is not None:
                             # Adopt the next state
                             state = next_state
+            except BaseException as e:
+                # Pass errors along, including SystemExit
+                error_queue.put(e)
+                return
+                
         
-        worker_thread = Thread(target=handle_queue)
+        worker_thread = Thread(target=handle_queue, daemon=True)
         worker_thread.start()
 
+
+        last_window_size = context.sdl_window.size
         while True: 
             # Event pumping loop
-
-            # Show console
-            context.present(console, keep_aspect=True)
             
-            for event in tcod.event.wait():
-                queue.put(event)
+            with console_manager.with_console() as console:
+                # Show console, while we know it isn't being rendered to
+                context.present(console, keep_aspect=True)
+            
+            for event in tcod.event.wait(timeout=0.1):
+                event_queue.put(event)
                 if isinstance(event, tcod.event.Quit):
                     worker_thread.join()
-                    raise SystemExit()
+                    sys.exit(0)
+                elif isinstance(event, tcod.event.WindowResized):
+                    # Manage window resizing and console resizing (while nobody is drawing)
+                    if context.sdl_window.size != last_window_size:
+                        force_min_size(context)
+                        width, height = context.recommended_console_size()
+                        console_manager.resize(width, height)
+                        last_window_size = context.sdl_window.size
+            try:
+                # Re-raise any errors on the main thread.
+                raise error_queue.get(block=False)
+            except Empty:
+                pass
                     
                     
 
