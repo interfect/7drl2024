@@ -15,6 +15,8 @@ import os
 import types
 import random
 
+from queue import Queue
+from threading import Thread
 from typing import Optional, Generator
 from urllib.request import urlretrieve
 
@@ -159,9 +161,12 @@ class GameState:
         """
         raise NotImplementedError()
     
-    def handle_event(self, event: tcod.event.Event) -> Optional["GameState"]:
+    def handle_event(self, event: Optional[tcod.event.Event]) -> Optional["GameState"]:
         """
         Handle the given user input event.
+        
+        Event can be None if we are calling this method because it hasn't been
+        called in a while; it is also the tick method.
         
         Returns the next state, or None to keep the current state.
         """
@@ -469,7 +474,7 @@ class PlayingState(GameState):
         KeySym.n: (1, 1),
     }
     
-    def handle_event(self, event: tcod.event.Event) -> Optional[GameState]:
+    def handle_event(self, event: Optional[tcod.event.Event]) -> Optional[GameState]:
         if isinstance(event, tcod.event.KeyDown) and event.sym in self.DIRECTION_KEYS:
             # The player wants to move.
             direction = self.DIRECTION_KEYS[event.sym]
@@ -537,7 +542,7 @@ class VictoryState(PlayingState):
         console.draw_frame(banner_x, banner_y, BANNER_WIDTH, BANNER_HEIGHT, decoration="╔═╗║ ║╚═╝", fg=(0, 255, 0))
         console.print_box(banner_x + 1, banner_y + 1, BANNER_WIDTH - 2, BANNER_HEIGHT - 2, "You Win!", fg=(0, 255, 0), alignment=tcod.libtcodpy.CENTER)
     
-    def handle_event(self, event: tcod.event.Event) -> Optional[GameState]:
+    def handle_event(self, event: Optional[tcod.event.Event]) -> Optional[GameState]:
         if isinstance(event, tcod.event.KeyDown) and event.sym == tcod.event.KeySym.ESCAPE:
             # Let the user quit at the end
             raise SystemExit()
@@ -558,7 +563,7 @@ class LoadingState(GameState):
         console.clear()
         console.print_box(0, 0, console.width, console.height, f"Loading: {self.progress[2]} ({self.progress[0]}/{self.progress[1]})")
     
-    def handle_event(self, event: tcod.event.Event) -> Optional[GameState]:
+    def handle_event(self, event: Optional[tcod.event.Event]) -> Optional[GameState]:
         # Make progress
         try:
             self.progress = self.process.send(None)
@@ -595,8 +600,11 @@ def main() -> None:
         FONT, columns=16, rows=16, charmap=tcod.tileset.CHARMAP_CP437
     )
     tcod.tileset.procedural_block_elements(tileset=tileset)
-    
-    state = LoadingState()
+
+    # We can't block the event wait loop or Windows will complain we're "not responding".
+    # So we get events in one thread and queue them up, and handle them and also render in another thread.
+    # The main thread just feeds the OS and the queue.
+    event_queue = Queue()   
     
     with tcod.context.new(tileset=tileset) as context:
         force_normal_shape(context)
@@ -604,21 +612,24 @@ def main() -> None:
         width, height = context.recommended_console_size()
         console = tcod.console.Console(width, height)
         
-        last_window_size = context.sdl_window.size
-        
-        while True: 
-            # Main loop
+        def handle_queue():
+            last_window_size = context.sdl_window.size
             
-            # Render the current game state
-            state.render_to(console)
+            state = LoadingState()
             
-            # Show that
-            context.present(console, keep_aspect=True)
+            while True:
+                # Main game loop
+                
+                # Render the current game state
+                state.render_to(console)
             
-            # Handle events
-            for event in tcod.event.wait(timeout=0.1):
+                try:
+                    event = queue.get(block=False)
+                except Empty:
+                    event = None
+                
                 if isinstance(event, tcod.event.Quit):
-                    raise SystemExit()
+                    return
                 elif isinstance(event, tcod.event.WindowResized):
                     if context.sdl_window.size != last_window_size:
                         force_min_size(context)
@@ -626,11 +637,26 @@ def main() -> None:
                         console = tcod.console.Console(width, height)
                         last_window_size = context.sdl_window.size
                 else:
-                    # Other events are probably input so let the game state deal with them.
                     next_state = state.handle_event(event)
-                    if next_state is not None:
-                        # Adopt the next state
-                        state = next_state
+                        if next_state is not None:
+                            # Adopt the next state
+                            state = next_state
+        
+        worker_thread = Thread(target=handle_queue)
+        worker_thread.start()
+
+        while True: 
+            # Event pumping loop
+
+            # Show console
+            context.present(console, keep_aspect=True)
+            
+            for event in tcod.event.wait():
+                queue.put(event)
+                if isinstance(event, tcod.event.Quit):
+                    worker_thread.join()
+                    raise SystemExit()
+                    
                     
 
 if __name__ == "__main__":
