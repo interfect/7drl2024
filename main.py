@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 
-import tcod.libtcodpy
+import tcod.bsp
 import tcod.console
 import tcod.context
 import tcod.event
 import tcod.image
+import tcod.libtcodpy
 import tcod.tileset
 
 from tcod.event import KeySym
@@ -18,6 +19,7 @@ import sys
 import types
 import random
 
+from enum import IntEnum
 from contextlib import contextmanager
 from queue import Queue, Empty
 from threading import Thread, Lock
@@ -319,7 +321,23 @@ class Player(WorldObject):
         
         # We collect loot items from enemies
         self.inventory: list[WorldObject] = []
-        
+    
+class Terrain(IntEnum):
+    VOID = 0
+    FLOOR = 1
+    WALL = 2
+    
+    @staticmethod
+    to_symbol(value: "Terrain") -> str:
+        """
+        Get the symbol to represent a kind of terrain.
+        """
+        return {
+            Terrain.VOID: " ",
+            Terrain.FLOOR: ".",
+            Terrain.WALL: "#"
+        }[value]
+
 class GameWorld:
     """
     World of the game.
@@ -336,47 +354,167 @@ class GameWorld:
         self.player = Player()
         
         # But put them in the list of all point objects.
-        self.objects = [self.player]
+        self.objects: List[WorldObject] = [self.player]
+        
+        # Holds a map of terrins
+        self.terrain: list[list[Terrain]] = []
     
-    @types.coroutine    
-    def generate_level(self, generator: ProceduralGenerator) -> Generator[tuple[int, int, str], None, None]:
+    def clear_terrain(self, x: int, y: int) -> None:
         """
-        Make a level to play. Structured as a coroutine; level is done when it stops.
+        Make a new empty terrain of the given size.
+        """
+        
+        self.terrain = [[Terrain.VOID for _ in range(y)] for __ in range(x)]
+        
+    def get_map_width() -> int:
+        """
+        Get the width of the current map.
+        """
+        return len(self.terrain)
+        
+    def get_map_height() -> int:
+        """
+        Get the height of the current map.
+        """
+        return len(self.terrain[0]) if self.terrain else 0
+        
+    def set_terrain(self, x: int, y: int, value: Terrain) -> None:
+        """
+        Set a terrain cell to the given value.
+        """
+        
+        self.terrain[x][y] = value
+        
+    def set_terrain_region(x: int, y: int, width: int, height: int, value: Terrain) -> None:
+        """
+        Set terrain in an area to the given type.
+        """
+        
+        for i in range(x, x + width):
+            for j in range (y, y + height):
+                self.set_terrain(i, j, value)
+                
+    def set_terrain_walls(x: int, y: int, width: int, height: int, value: Terrain) -> None:
+        """
+        Set terrain around the edges of an area to the given type.
+        """
+        
+        # Just draw 4 wall lines
+        self.set_terrain_region(x, y, width, 1)
+        self.set_terrain_region(x, y + height - 1, width, 1)
+        self.set_terrain_region(x, y, 1, height)
+        self.set_terrain_region(x + width - 1, y, 1, height)
+        
+        
+    def get_terrain(self, x: int, y: int) -> Terrain:
+        """
+        Get the value of the terrain at a location, which may not be in the terrain bounds.
+        """
+        
+        if x < 0 or x >= len(self.terrain):
+            return Terrain.VOID
+        if y < 0 or y >= len(self.terrain[x]):
+            return Terrain.VOID
+        return terrain[x][y]
+        
+    @types.coroutine
+    def generate_map(self) -> Generator[tuple[int, int, str], None, None]:
+        """
+        Make a terrain map to paly on.
+        
+        Structured as a coroutine generator; level is done when it stops.
         
         It yields progress tuples of completed out of total, and progress message.
         """
         
+        MAP_WIDTH = 256
+        MAP_HEIGHT = 256
+        
+        yield (0, 0, "Generate terrain")
+        
+        bsp = tcod.bsp.BSP(x=0, y=0, width=MAP_WIDTH, height=MAP_HEIGHT)
+        bsp.split_recursive(
+            depth=6,
+            min_width=3,
+            min_height=3,
+            max_horizontal_ratio=1.5,
+            max_vertical_ratio=1.5
+        )
+        
+        node_total = len(bsp.pre_order())
+        node_count = 0
+        yield (node_count, node_total, "Generate terrain")
+
+        for node in bsp.pre_order():
+            # Pre-order traverse the tree, so do children and then parents
+            if node.children:
+                # Connect the two child rooms somehow
+                node1, node2 = node.children
+                if node.horizontal:
+                    # node1 is left of node2
+                    self.set_terrain_region(node1.x + 1, node1.y + node1.height // 2, node2.x - node1.x, 1, Terrain.FLOOR)
+                else:
+                    # node1 is above node2
+                    self.set_terrain_region(node1.x + node1.width // 2, node1.y, 1, node2.y - node1.y, Terrain.FLOOR)
+            else:
+                # Make a room out of this node.
+                self.set_terrain_region(node.x + 1, node.y + 1, node.width - 1, node.height - 1, Terrain.FLOOR)
+                self.set_terrain_walls(node.x, node.y, node.width, node.height, Terrain.WALL)
+            node_count += 1
+            yield (node_count, node_total, "Generate terrain")
+            
+                
+    
+    @types.coroutine    
+    def generate_level(self, generator: ProceduralGenerator) -> Generator[tuple[int, int, str], None, None]:
+        """
+        Make a level to play.
+        
+        Structured as a coroutine generator; level is done when it stops.
+        
+        It yields progress tuples of completed out of total, and progress message.
+        """
+        
+        # Make sure the model is available
         yield from generator.download_model()
+        
+        # Make some terrain
+        yield from self.generate_map()
         
         # Throw out the old objects, except the player who is here
         self.objects = [self.player]
-        # Put the player at the origin
-        self.player.x = 0
-        self.player.y = 0
-        
-        # Make an initial map
-        MAP_RANGE = 10
-        
+        # Put the player somewhere
+        while True:
+            x = random.randrange(0, self.get_map_width())
+            y = random.randrange(0, self.get_map_height())
+            if self.free_space_at(x, y):
+                # Found a place for the player
+                self.player.x = x
+                self.player.y = y
+                break
+
+        # Make obstacles
         object_count = 0
         desired_object_count = random.randint(5, 7)
         yield (object_count, desired_object_count, "Making objects")
         while object_count < desired_object_count:
-            x = random.randint(-MAP_RANGE, MAP_RANGE)
-            y = random.randint(-MAP_RANGE, MAP_RANGE)
-            if self.object_at(x, y) is None:
+            x = random.randrange(0, self.get_map_width())
+            y = random.randrange(0, self.get_map_height())
+            if self.free_space_at(x, y):
                 # Put something here
                 object_type = generator.select_object("obstacle")
                 self.add_object(WorldObject(x, y, **object_type))
                 object_count += 1
                 yield (object_count, desired_object_count, "Making objects")
         
+        # Make enemies
         enemy_count = 0
         desired_enemy_count = random.randint(2, 5)
         yield (enemy_count, desired_enemy_count, "Making enemies")
         while enemy_count < desired_enemy_count:
-            x = random.randint(-MAP_RANGE, MAP_RANGE)
-            y = random.randint(-MAP_RANGE, MAP_RANGE)
-            if self.object_at(x, y) is None:
+            x = random.randrange(0, self.get_map_width())
+            y = random.randrange(0, self.get_map_height())
+            if self.free_space_at(x, y):
                 enemy_type = generator.select_object("enemy")
                 enemy = Enemy(x, y, **enemy_type)
                 yield (enemy_count, desired_enemy_count, "Making enemies")
@@ -393,6 +531,13 @@ class GameWorld:
             if obj.x == x and obj.y == y:
                 return obj
         return None
+        
+    def free_space_at(self, x: int, y: int) -> bool:
+        """
+        Return True if there is free space for an object at the given position.
+        """
+        
+        return self.terrain_at(x, y) == Terrain.FLOOR and self.object_at(x, y) is None
         
     def has_enemies(self) -> bool:
         """
@@ -429,7 +574,16 @@ class GameWorld:
         view_x = self.player.x - width // 2
         view_y = self.player.y - height // 2
         
+        # Draw the terrain
+        for x_in_view in range(width):
+            world_x = x_in_view + view_x
+            for y_in_view in range(height):
+                world_y = y_in_view + view_y
+                console.print(x_in_view + x, y_in_view + y, Terrain.to_symbol(self.get_terrain(world_x, world_y)))
+                
+        
         for to_render in self.objects:
+            # Draw all the objects
             x_in_view = to_render.x - view_x
             y_in_view = to_render.y - view_y
             if x_in_view >= 0 and x_in_view < width and y_in_view >= 0 and y_in_view < height:
@@ -529,9 +683,13 @@ class PlayingState(GameState):
             
             obstruction = self.world.object_at(next_x, next_y)
             if obstruction is None:
-                # You can just move there
-                self.world.player.x = next_x
-                self.world.player.y = next_y
+                terrain = self.world.get_terrain(x, y)
+                if terrain == Terrain.FLOOR:
+                    # You can just move there
+                    self.world.player.x = next_x
+                    self.world.player.y = next_y
+                else:
+                    self.log("Impassable terrain!")
             elif isinstance(obstruction, Enemy):
                 # Time to fight!
                 damage = random.randint(1, 10)
