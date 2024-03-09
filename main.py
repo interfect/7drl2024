@@ -20,7 +20,7 @@ from contextlib import contextmanager
 from queue import Queue, Empty
 from threading import Thread, Lock
 from typing import Optional, Generator
-from urllib.request import urlretrieve
+from urllib.request import urlopen
 
 class ProceduralGenerator:
     
@@ -71,7 +71,36 @@ class ProceduralGenerator:
         self.grammars: dict[str, LlamaGrammar] = {}
         # And we lazily load the model to generate new things
         self.model: Optional[Llama] = None
+    
+    @types.coroutine
+    def download_model(self) -> Generator[tuple[int, int, str], None, None]:
+        """
+        Download the model file we are meant to use.
         
+        Yields progress events.
+        """
+        
+        source_url = self.MODEL_URLS[self.MODEL]
+        dest_path = self.MODEL
+        
+        with open(dest_path + ".tmp", "wb") as out_handle:
+            yield (0, 0, f"Download {source_url}")
+            with urlopen(source_url) as handle:
+                expected_length = int(handle.headers.get('Content-Length'))
+                bytes_read = 0
+                while True:
+                    yield (bytes_read, expected_length, f"Download {source_url}")
+                    buffer = handle.read(1024 * 1024)
+                    if len(buffer) == 0:
+                        # Hit EOF
+                        break
+                    bytes_read += len(buffer)
+                    out_handle.write(buffer)
+                yield (bytes_read, expected_length, f"Download {source_url}")
+                    
+        os.rename(dest_path + ".tmp", dest_path)
+                    
+    
     def get_model(self) -> Llama:
         """
         Get the model to generate with.
@@ -79,7 +108,10 @@ class ProceduralGenerator:
         if self.model is None:
             if not os.path.exists(self.MODEL):
                 print("Download model")
-                urlretrieve(self.MODEL_URLS[self.MODEL], self.MODEL)
+                task = self.download_model()
+                for _ in task:
+                    # Run the generator to completion
+                    pass
         
             print("Load model")
             self.model = Llama(
@@ -173,6 +205,9 @@ class GameState:
         Returns the next state, or None to keep the current state.
         """
         raise NotImplementedError()
+        
+    def get_wait(self) -> float:
+        return 0.1
         
         
 class WorldObject:
@@ -304,6 +339,8 @@ class GameWorld:
         
         It yields progress tuples of completed out of total, and progress message.
         """
+        
+        yield from generator.download_model()
         
         # Throw out the old objects, except the player who is here
         self.objects = [self.player]
@@ -574,6 +611,10 @@ class LoadingState(GameState):
         except StopIteration:
             # Now it is done
             return PlayingState(self.world)
+            
+            
+    def get_wait(self) -> float:
+        return 0
         
 
 class ConsoleManager:
@@ -656,7 +697,7 @@ def main() -> None:
                         state.render_to(console)
                 
                     try:
-                        event = event_queue.get(timeout=0.1)
+                        event = event_queue.get(timeout=state.get_wait())
                     except Empty:
                         event = None
                     
