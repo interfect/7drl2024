@@ -538,18 +538,20 @@ class VictoryState(PlayingState):
         
         # Then draw a big victory banner
         BANNER_WIDTH = 20
-        BANNER_HEIGHT = 3
+        BANNER_HEIGHT = 4
         banner_x = console.width // 2 - BANNER_WIDTH // 2
         banner_y = console.height // 2 - BANNER_HEIGHT // 2
         console.draw_frame(banner_x, banner_y, BANNER_WIDTH, BANNER_HEIGHT, decoration="╔═╗║ ║╚═╝", fg=(0, 255, 0))
-        console.print_box(banner_x + 1, banner_y + 1, BANNER_WIDTH - 2, BANNER_HEIGHT - 2, "You Win!", fg=(0, 255, 0), alignment=tcod.libtcodpy.CENTER)
+        console.print_box(banner_x + 1, banner_y + 1, BANNER_WIDTH - 2, BANNER_HEIGHT - 2, "You Win!\nPlay Again [Y/N]?", fg=(0, 255, 0), alignment=tcod.libtcodpy.CENTER)
     
     def handle_event(self, event: Optional[tcod.event.Event]) -> Optional[GameState]:
-        if isinstance(event, tcod.event.KeyDown) and event.sym == tcod.event.KeySym.ESCAPE:
-            # Let the user quit at the end
-            raise SystemExit()
-        # Don't change state by default
-        return None
+        if isinstance(event, tcod.event.KeyDown):
+            if event.sym in (tcod.event.KeySym.ESCAPE, tcod.event.KeySym.n):
+                # Let the user quit at the end
+                raise SystemExit()
+            elif event.sym == tcod.event.KeySym.y:
+                # Start a new game
+                return LoadingState()
         
 class LoadingState(GameState):
     """
@@ -569,7 +571,6 @@ class LoadingState(GameState):
         # Make progress
         try:
             self.progress = self.process.send(None)
-            print(f"Progress: {self.progress}")
         except StopIteration:
             # Now it is done
             return PlayingState(self.world)
