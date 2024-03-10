@@ -46,22 +46,23 @@ class ProceduralGenerator:
     
     # This holds a prompt template for each type of object.
     PROMPTS = {
-        "enemy": "An enemy for my 7DRL roguelike, way better than \"{}\" or \"{}\" from the last game:",
-        "obstacle": "An obstacle in a level for my 7DRL roguelike, way better than \"{}\" or \"{}\" from the last game:",
-        "loot": "A loot item for my 7DRL roguelike, way better than \"{}\" or \"{}\" from the last game:"
+        "enemy": "An enemy type for my 7DRL roguelike, way better than \"{}\" or \"{}\" from the last game. The \"a\" or \"the\" is *not* in the name, and I tried to really make it fit in with its elemental domain.",
+        "obstacle": "An obstacle type in a level for my 7DRL roguelike, way better than \"{}\" or \"{}\" from the last game. The \"a\" or \"the\" is *not* in the name, and I tried to really make it fit in with its elemental domain.",
+        "loot": "An item type that the player can loot for my 7DRL roguelike, way better than \"{}\" or \"{}\" from the last game. The \"a\" or \"the\" is *not* in the name, and I tried to really make it fit in with its elemental domain. It is *not* a person; you can't loot people."
     }
     
     # This holds example item types used to vary the prompt.
     EXAMPLES = {
         "enemy": [
             "dire cat",
-            "evil stick",
-            "boss",
+            "angry boss",
             "CEO",
-            "mecha-CEO",
-            "really cool guy",
+            "mecha CEO",
+            "master chef",
             "nasal demon",
             "tiger shark",
+            "wombat",
+            "dire accountant",
         ],
         "obstacle": [
             "boring wall",
@@ -70,6 +71,8 @@ class ProceduralGenerator:
             "hole in the ground",
             "missing floor tile",
             "pile of rusty metal",
+            "immovable rod",
+            "road work",
         ],
         "loot": [
             "double-ended sword",
@@ -86,7 +89,7 @@ class ProceduralGenerator:
     ELEMENTAL_DOMAINS = ["normal", "earth", "air", "fire", "water", "good", "evil", "business"]
     
     # How likely is a thing to differ from the domain of its parent?
-    DIFFERENT_DOMAIN_CHANCE = 0.2
+    DIFFERENT_DOMAIN_CHANCE = 0.1
     
     # Which domains beat which others?
     BEAT_PAIRS = {
@@ -101,7 +104,7 @@ class ProceduralGenerator:
     
     # What symbols represent the elemental domains?
     DOMAIN_SYMBOLS = {
-        "normal": "○",
+        "normal": "•",
         "earth": "♦",
         "air": "♠",
         "fire": "♣",
@@ -112,25 +115,25 @@ class ProceduralGenerator:
     }
     # What colors represent the elemental domains?
     DOMAIN_COLORS = {
-        "normal": (255, 255, 255),
+        "normal": (127, 127, 127),
         "earth": (16, 160, 64),
         "air": (255, 255, 64),
         "fire": (255, 64, 64),
         "water": (16, 64, 160),
-        "good": (0, 0, 127),
+        "good": (0, 255, 255),
         "evil": (127, 0, 0),
-        "business": (0, 127, 0)
+        "business": (128, 255, 64)
     }
     # What symbols represent the rarity levels?
     RARITY_SYMBOLS = {
-        "common": "▬",
+        "common": "○",
         "uncommon": "♪",
         "rare": "♫",
         "ultra-rare": "‼"
     }
     # What colors represent the rarity levels?
     RARITY_COLORS = {
-        "common": (255, 255, 255),
+        "common": (127, 127, 127),
         "uncommon": (0, 255, 0),
         "rare": (255, 127, 0),
         "ultra-rare": (255, 0, 255)
@@ -237,7 +240,7 @@ class ProceduralGenerator:
         
         while True:
             # Run the model
-            result = self.get_model()(prompt, grammar=self.get_grammar(object_type), stop=["\n\n"], max_tokens=-1, mirostat_mode=2)
+            result = self.get_model()(prompt, grammar=self.get_grammar(object_type), stop=["\n\n"], max_tokens=-1, mirostat_mode=2, temperature=0.6)
             # Grab the text
             result_text = result["choices"][0]["text"]
             if profanity.contains_profanity(result_text):
@@ -265,7 +268,7 @@ class ProceduralGenerator:
         if random.random() < 0.01:
             return "ultra-rare"
         else:
-            return random.choice(["common"] * 15 + ["uncommon"] * 4 + ["rare"] * level_number)
+            return random.choice(["common"] * 16 + ["uncommon"] * 8 * level_number + ["rare"] * level_number * level_number)
        
     def select_object(self, object_type: str, rarity: str, elemental_domain: Optional[str] = None) -> dict:
         """
@@ -838,7 +841,7 @@ class GameWorld:
         
         # Make obstacles
         object_count = 0
-        desired_object_count = random.choice([0, 0, 1, 3])
+        desired_object_count = random.choice([0] * 7 + [1] * 2 + [3])
         if free_spaces >= desired_object_count:
             yield (object_count, desired_object_count, "Making obstacles")
             for pos in self.free_spaces_in(x + 1, y + 1, width - 2, height - 2, desired_object_count):
@@ -858,7 +861,8 @@ class GameWorld:
         
         # Make enemies
         enemy_count = 0
-        desired_enemy_count = random.choice([0] * 5 + [1] * 2 + [2] * self.level_number)
+        hard_room_count = 2 if self.level_number < 2 else (3 if self.level_number < 5 else 4)
+        desired_enemy_count = random.choice([0] * 5 + [1] * 2 + [2] + [hard_room_count] * self.level_number)
         if free_spaces >= desired_enemy_count:
             yield (enemy_count, desired_enemy_count, "Making enemies")
             for pos in self.free_spaces_in(x, y, width, height, desired_enemy_count):
@@ -867,8 +871,11 @@ class GameWorld:
                 # Make an enemy for probably the room's domain
                 enemy_domain = generator.select_domain(room_domain)
                 enemy_type = generator.select_object("enemy", rarity=rarity, elemental_domain=enemy_domain)
+                if self.level_number > 6:
+                    # Make the enemies stronger until the player loses
+                    enemy_type["health"] *= self.level_number // 3
                 if enemy_type["health"] > self.level_number * 20:
-                    # Don't let it be too strong too soon
+                    # Don't let them be too strong too soon
                     enemy_type["health"] = self.level_number * 20
                 enemy = Enemy(pos[0], pos[1], **enemy_type)
                 yield (enemy_count, desired_enemy_count, "Making enemies")
@@ -905,7 +912,7 @@ class GameWorld:
         for room_number, room in enumerate(self.rooms):
             # Put stuff in each room
             for (done, total, message) in self.populate_room(room[0], room[1], room[2], room[3], generator):
-                yield (room_number, len(self.rooms), message + f" ({done +  1}/{total}) in room {room_number + 1}/{len(self.rooms)}")
+                yield (room_number, len(self.rooms), message + f" ({done}/{total}) in room {room_number + 1}")
         
         # Put the player somewhere
         for x, y in self.free_spaces_in(0, 0, self.get_map_width(), self.get_map_height(), 1):
@@ -1036,14 +1043,16 @@ class PlayingState(GameState):
             held_item_name = held_item.indefinite_name()
         else:
             held_item_name = "(nothing)"
-        console.print_box(0, 0, console.width, STATUS_HEIGHT, f"Item (q/e/f): XX {held_item_name}", alignment=tcod.libtcodpy.LEFT)
+        console.print_box(0, 0, console.width, STATUS_HEIGHT, f"Item (q/e/f):    {held_item_name}", alignment=tcod.libtcodpy.LEFT)
         # Print a colorful quick reference for rarity and element
         QUICKREF_START=14
         if held_item is not None:
             console.print(QUICKREF_START, 0, held_item.domain_symbol(), fg=held_item.domain_color())
             console.print(QUICKREF_START + 1, 0, held_item.rarity_symbol(), fg=held_item.rarity_color())
-        console.print_box(0, STATUS_HEIGHT - 1, console.width, STATUS_HEIGHT, f"{self.world.player.health}/{self.world.player.max_health} HP", fg=(127, 0, 0), alignment=tcod.libtcodpy.RIGHT)
-        console.print_box(0, STATUS_HEIGHT - 1, console.width, STATUS_HEIGHT, f"Cash: ${self.world.player.money}", fg=(0, 127, 0), alignment=tcod.libtcodpy.LEFT)
+        console.print_box(0, STATUS_HEIGHT - 1, console.width, STATUS_HEIGHT, f"Cash: ${self.world.player.money:,}", fg=(128, 255, 64), alignment=tcod.libtcodpy.LEFT)
+        console.print_box(0, STATUS_HEIGHT - 1, console.width, STATUS_HEIGHT, f"Level {self.world.level_number}", fg=(127, 127, 127), alignment=tcod.libtcodpy.CENTER)
+        console.print_box(0, STATUS_HEIGHT - 1, console.width, STATUS_HEIGHT, f"{self.world.player.health}/{self.world.player.max_health} HP", fg=(0, 255, 255), alignment=tcod.libtcodpy.RIGHT)
+        
          
         
         
@@ -1153,7 +1162,7 @@ class PlayingState(GameState):
                     if loot is not None:
                         self.world.player.acquire_loot(loot)
                         rarity_article = "a" if loot.rarity != "uncommon" else "an"
-                        self.log(f"You loot {loot.indefinite_name()}, {rarity_article} {loot.rarity} {loot.elemental_domain} treasure worth ${loot.value}!")
+                        self.log(f"You loot {loot.indefinite_name()}, {rarity_article} {loot.rarity} {loot.elemental_domain} treasure worth ${loot.value:,}!")
                         if len(self.world.player.inventory) == 1:
                             # Auto-equip the first item
                             self.world.player.next_item()
@@ -1257,7 +1266,7 @@ class SellDialogState(GameState):
         else:
             color = (255, 0, 0)
             message = f"Item: {self.to_sell.definite_name()}\nRarity: {self.to_sell.rarity}\nDomain: {self.to_sell.elemental_domain}"
-            continue_message = f"Fence for ${self.to_sell.value} [Y/N]?"
+            continue_message = f"Fence for ${self.to_sell.value:,} [Y/N]?"
         
         # Then draw a big victory banner
         BANNER_WIDTH = 30
@@ -1283,7 +1292,7 @@ class SellDialogState(GameState):
                     self.world.player.remove_loot(self.to_sell)
                     self.world.player.money += self.to_sell.value
                     adjective = random.choice(["quick", "cool", "cheeky", "slick"])
-                    self.return_state.log(f"You make a {adjective} ${self.to_sell.value} by fencing {self.to_sell.definite_name()}.")
+                    self.return_state.log(f"You make a {adjective} ${self.to_sell.value:,} by fencing {self.to_sell.definite_name()}.")
                     if self.world.player.get_held_item() is not None:
                         self.return_state.log(self.world.player.get_held_item().ready_message())
                 # Go back
@@ -1386,6 +1395,15 @@ def force_normal_shape(context: tcod.context.Context) -> None:
         context.sdl_window.size = (context.sdl_window.size[0], 2 * context.sdl_window.size[0])
 
 def main() -> None:
+    DEMO_MODE = True
+    if DEMO_MODE:
+        # Just exercise the generator settings
+        generator = ProceduralGenerator()
+        while True:
+            generator.invent_object("loot", rarity="common", elemental_domain="good")
+        return 0
+        
+
     profanity.load_censor_words()
 
     #FONT="Alloy_curses_12x12.png"
