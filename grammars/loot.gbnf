@@ -1,7 +1,8 @@
 root ::= RoguelikePartialItem
 RoguelikePartialItem ::= (
     line
-    commonProps "\n"
+    commonProps and
+    "\"value\": " percent "\n"
     "}"
 )
 

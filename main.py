@@ -38,11 +38,15 @@ class ProceduralGenerator:
     #MODEL="tinyllama-1.1b-1t-openorca.Q4_K_M.gguf"
     MODEL="mistral-7b-v0.1.Q4_K_M.gguf"
     
+    # What special characters could we use.
+    # TODO: Actually use these. They can't be in the grammar. Try rolling them ourselves and showing the model?
+    SPECIAL_CHARS="☺☻♥♦♣♠•◘○◙♂♀♪♫☼►◄↕‼¶§▬↨↑↓→←∟↔▲▼"
+    
     # This holds a prompt template for each type of object.
     PROMPTS = {
-        "enemy": "Here is a JSON object describing an enemy for my 7DRL roguelike, way better than \"{}\" from the last game:",
-        "obstacle": "Here is a JSON object describing an obstacle for my 7DRL roguelike, way better than \"{}\" from the last game:",
-        "loot": "Here is a JSON object describing a loot item for my 7DRL roguelike, way better than \"{}\" from the last game:"
+        "enemy": "An enemy for my 7DRL roguelike, way better than \"{}\" or \"{}\" from the last game:",
+        "obstacle": "An obstacle in a level for my 7DRL roguelike, way better than \"{}\" or \"{}\" from the last game:",
+        "loot": "A loot item for my 7DRL roguelike, way better than \"{}\" or \"{}\" from the last game:"
     }
     
     # This holds example item types used to vary the prompt.
@@ -51,22 +55,64 @@ class ProceduralGenerator:
             "dire cat",
             "evil stick",
             "boss",
-            "really cool guy who doesn't affraid of anything",
-            "nasal demon"
+            "CEO",
+            "mecha-CEO",
+            "really cool guy",
+            "nasal demon",
+            "tiger shark",
         ],
         "obstacle": [
             "boring wall",
             "portcullis",
             "moderately large stick",
-            "hole in the ground"
+            "hole in the ground",
+            "missing floor tile",
+            "pile of rusty metal",
         ],
         "loot": [
             "double-ended sword",
             "pointy rock",
             "small pile of gold",
-            "portable hole"
+            "portable hole",
+            "Spear of Justice",
+            "stapler",
+            "gun",
         ]
     }
+    
+    # What elemental domains are there?
+    ELEMENTAL_DOMAINS = ["normal", "earth", "air", "fire", "water", "good", "evil", "business"]
+    
+    # How likely is a thing to differ from the domain of its parent?
+    DIFFERENT_DOMAIN_CHANCE = 0.2
+    
+    # Which domains beat which others?
+    BEAT_PAIRS = {
+        ("water", "fire"),
+        ("fire", "air"),
+        ("air", "earth"),
+        ("earth", "water"),
+        ("evil", "good"),
+        ("good", "business"),
+        ("business", "evil")
+    }
+    
+    @classmethod
+    def strong_against(cls, domain_a: str, domain_b: str) -> bool:
+        """
+        Return True if the first elemental domain should deal more damage than usual to the second.
+        """
+        
+        return (domain_a, domain_b) in cls.BEAT_PAIRS
+        
+    @classmethod
+    def weak_against(cls, domain_a: str, domain_b: str) -> bool:
+        """
+        Return True if the first elemental domain should deal less damage than usual to the second.
+        """
+        
+        return cls.strong_against(domain_b, domain_a)
+        
 
     def __init__(self) -> None:
         """
@@ -87,9 +133,7 @@ class ProceduralGenerator:
         
         Yields progress events.
         """
-        
-        
-        
+
         source_url = self.MODEL_URLS[self.MODEL]
         dest_path = self.MODEL
         
@@ -145,8 +189,9 @@ class ProceduralGenerator:
         Generate a new, never-before-seen object of the given type, with the given parameters.
         """
         
-        # Get a prompt with a random example in it
-        prompt = self.PROMPTS[object_type].format(random.choice(self.EXAMPLES[object_type]))
+        # Get a prompt with two random examples in it
+        chosen_examples = random.sample(self.EXAMPLES[object_type], 2)
+        prompt = self.PROMPTS[object_type].format(chosen_examples[0], chosen_examples[1])
         
         # Add any existing keys, leaving off the closing brace and adding a trailing comma
         prompt += "\n\n```\n" + json.dumps(features, indent=2)[:-1].rstrip() + "," if len(features) > 0 else ""
@@ -167,33 +212,48 @@ class ProceduralGenerator:
         print(f"Invented: {obj}")
         return obj
         
-        
-    def select_object(self, object_type: str) -> dict:
+    def select_rarity(self, level_number: int) -> str:
         """
-        Get a dict defining an object of the given type.
+        Select a rarity level for an item at the given dungeon level.
+        """
         
-        All types have "symbol", "name", "definite_article", and "indefinite_article".
+        return random.choice(["common"] * 10 + ["uncommon"] * 3 + ["rare"] * level_number)
         
-        "enemy": additionally has "health"
+        
+    def select_object(self, object_type: str, rarity: str, elemental_domain: Optional[str] = None) -> dict:
+        """
+        Get a dict defining an object of the given type and rarity.
+        
+        Rarity can be "common", "uncommon", or "rare".
+        
+        All types have:
+            "symbol",
+            "name",
+            "definite_article",
+            "indefinite_article",
+            "nominative_pronoun",
+            "elemental_domain"
+        
+        "enemy": additionally has "health".
         
         "obstacle": has no additional fields. 
+        
+        "loot": additionally has a "value".
         """
+
+        if elemental_domain is None:
+            # Pick an elemental domain if not provided
+            elemental_domain = self.select_domain()
         
-        # We maintain a database of objects by type and rarity
-        rarity = random.choice(["common"] * 10 + ["uncomon"] * 3 + ["rare"])
-        
-        # Within each we have 10 types
-        type_num = random.randrange(0, 10)
+        # Within each we have 3 types
+        type_num = random.randrange(0, 3)
         
         # Where should that file be?
-        path = os.path.join("objects", object_type, rarity, f"{type_num}.json")
+        path = os.path.join("objects", object_type, elemental_domain, rarity, f"{type_num}.json")
         if not os.path.exists(path):
             # Make directory
             os.makedirs(os.path.dirname(path), exist_ok=True)
-            
-            # Pick some traditionally-rolled stats
-            elemental_domain = random.choice(["normal", "earth", "air", "fire", "water", "good", "evil", "business"])
-            
+
             # Invent the object type
             obj = self.invent_object(object_type, rarity=rarity, elemental_domain=elemental_domain)
             
@@ -201,6 +261,18 @@ class ProceduralGenerator:
             json.dump(obj, open(path, 'w'))
         
         return json.load(open(path))
+        
+    def select_domain(self, parent_domain: Optional[str] = None):
+        """
+        Pick an elemental domain, possibly given an elemental domain of the containing thing.
+        """
+        
+        if parent_domain is None or random.random() < self.DIFFERENT_DOMAIN_CHANCE:
+            # Don't match the parent
+            return random.choice(self.ELEMENTAL_DOMAINS)
+        else:
+            # Match the parent
+            return parent_domain
 
 class GameState:
     """
@@ -280,6 +352,12 @@ class WorldObject:
             # Oops we rolled a none name with a bad grammar
             self.name = "(unnamed)"
         self.indefinite_article = indefinite_article
+        if self.indefinite_article == "a" and self.name[0].lower() in "aeiou":
+            # Fix article
+            self.indefinite_article = "an"
+        elif self.indefinite_article == "an" and self.name[0].lower() not in "aeiou":
+            # Fix article the other way
+            self.indefinite_article = "a"
         self.definite_article = definite_article
         self.nominative_pronoun = nominative_pronoun
         self.accusative_pronoun = self.NOMINATIVE_TO_ACCUSATIVE[nominative_pronoun]
@@ -318,6 +396,43 @@ class WorldObject:
         parts.append(self.name)
         return " ".join(parts)
         
+    def hit(self, other: "GameObject") -> tuple[int, str]:
+        """
+        Hit one game object with another.
+        
+        Return the damage that should be dealt, and an adverb describing the effectiveness, like "brutally" or "futilely", or an empty string for normal.
+        """
+        
+        if isinstance(self, Player):
+            # Unarmed players can't do much damage
+            max_damage = 4
+        else:
+            # Rarer items get bigger dice
+            max_damage = {
+                "common": 8,
+                "uncommon": 10,
+                "rare": 12
+            }[self.rarity]
+        
+        base_damage = random.randint(1, max_damage)
+        
+        if ProceduralGenerator.strong_against(self.elemental_domain, other.elemental_domain):
+            return base_damage * 2, "brutally"
+        elif ProceduralGenerator.weak_against(self.elemental_domain, other.elemental_domain):
+            return base_damage // 4, "futilely"
+        else:
+            return base_damage, ""
+            
+
+class Loot(WorldObject):
+    """
+    Represents a lootable inventory item.
+    """
+    def __init__(self, x: int, y: int, value: int = 0, **kwargs) -> None:
+        super().__init__(x, y, **kwargs)
+        
+        # Save the gold value
+        self.value = value
         
 class Enemy(WorldObject):
     """
@@ -330,14 +445,77 @@ class Enemy(WorldObject):
         self.health = health
         
         # An enemy can be carrying loot items
-        self.inventory: list[WorldObject] = []
-         
+        self.inventory: list[Loot] = []
+
+
+       
 class Player(WorldObject):
     def __init__(self) -> None:
         super().__init__(0, 0, symbol="@", name="Player", z_layer=1)
         
         # We collect loot items from enemies
-        self.inventory: list[WorldObject] = []
+        self.inventory: list[Loot] = []
+        
+        # We have a selected item index, or None for no item.
+        self.held_item_index: Optional[int] = None
+        
+        # And we have health
+        self.max_health = 200
+        self.health = self.max_health
+        
+        # And we have a total value score for the items we got
+        self.value = 0
+        
+    def acquire_loot(self, loot: Loot) -> None:
+        """
+        Add the given loot to the player's inventory.
+        """
+        
+        self.inventory.append(loot)
+        self.value += loot.value
+        
+    def get_held_item(self) -> Optional[Loot]:
+        """
+        Get the item the player is using.
+        """
+        if self.held_item_index is None:
+            return None
+        return self.inventory[self.held_item_index]
+        
+    def next_item(self) -> None:
+        """
+        Hold the next item.
+        """
+        
+        if self.held_item_index is None:
+            if len(self.inventory) > 0:
+                # Pick first item
+                self.held_item_index = 0
+        elif self.held_item_index + 1 < len(self.inventory):
+            # Pick next item
+            self.held_item_index += 1
+        else:
+            # Pick no item
+            self.held_item_index = None
+            
+    def previous_item(self) -> None:
+        """
+        Hold the previous item.
+        """
+        
+        if self.held_item_index is None:
+            if len(self.inventory) > 0:
+                # Pick last item
+                self.held_item_index = len(self.inventory) - 1
+        elif self.held_item_index - 1 >= 0:
+            # Pick previous item
+            self.held_item_index -= 1
+        else:
+            # Pick no item
+            self.held_item_index = None
+            
+        
+
     
 class Terrain(IntEnum):
     VOID = 0
@@ -362,13 +540,20 @@ class GameWorld:
     Holds the player and also the other things on the level.
     """
     
-    def __init__(self) -> None:
+    def __init__(self, level_number: int, player: Player) -> None:
         """
-        Set up a fresh world.
+        Set up a fresh world, using the given player.
         """
         
+        # Remember the level number
+        self.level_number = level_number
+        # And the domain which will get filled in when we generate it.
+        self.level_domain: Optional[str] = None
+        
         # Hang on to the player specifically
-        self.player = Player()
+        self.player = player
+        # Make sure the player starts at full health
+        self.player.health = self.player.max_health
         
         # But put them in the list of all point objects.
         self.objects: List[WorldObject] = [self.player]
@@ -532,6 +717,8 @@ class GameWorld:
         
         print(f"Populate {x}, {y}, {width}, {height}")
         
+        room_domain = generator.select_domain(self.level_domain)
+        
         # We keep obstacles walls to stay out of the doors.
         free_spaces = (width - 2) * (height - 2)
         
@@ -542,7 +729,11 @@ class GameWorld:
             yield (object_count, desired_object_count, "Making obstacles")
             for pos in self.free_spaces_in(x + 1, y + 1, width - 2, height - 2, desired_object_count):
                 # Put something here
-                object_type = generator.select_object("obstacle")
+                object_type = generator.select_object(
+                    "obstacle",
+                    rarity=generator.select_rarity(self.level_number),
+                    elemental_domain=generator.select_domain(room_domain)
+                )
                 self.add_object(WorldObject(pos[0], pos[1], **object_type))
                 object_count += 1
                 yield (object_count, desired_object_count, "Making obstacles")
@@ -553,14 +744,24 @@ class GameWorld:
         
         # Make enemies
         enemy_count = 0
-        desired_enemy_count = random.choice([0, 0, 0, 0, 1, 1, 2])
+        desired_enemy_count = random.choice([0] * 5 + [1] * 2 + [2] * self.level_number)
         if free_spaces >= desired_enemy_count:
             yield (enemy_count, desired_enemy_count, "Making enemies")
             for pos in self.free_spaces_in(x, y, width, height, desired_enemy_count):
-                enemy_type = generator.select_object("enemy")
+                # Pick a rarity for the enemy and its item
+                rarity = generator.select_rarity(self.level_number)
+                # Make an enemy for probably the room's domain
+                enemy_domain = generator.select_domain(room_domain)
+                enemy_type = generator.select_object("enemy", rarity=rarity, elemental_domain=enemy_domain)
+                if enemy_type["health"] > self.level_number * 20:
+                    # Don't let it be too strong too soon
+                    enemy_type["health"] = self.level_number * 20
                 enemy = Enemy(pos[0], pos[1], **enemy_type)
                 yield (enemy_count, desired_enemy_count, "Making enemies")
-                enemy.inventory.append(WorldObject(pos[0], pos[1], **generator.select_object("loot")))
+                # Make a loot for probably the enemy's domain
+                loot_domain = generator.select_domain(enemy_domain)
+                loot_type = generator.select_object("loot", rarity=rarity, elemental_domain=loot_domain)
+                enemy.inventory.append(Loot(pos[0], pos[1], **loot_type))
                 self.add_object(enemy)
                 enemy_count += 1
                 yield (enemy_count, desired_enemy_count, "Making enemies")
@@ -581,6 +782,9 @@ class GameWorld:
         # Throw out the old objects, except the player who is here
         self.objects = [self.player]
         
+        # Pick an elemental domain
+        self.level_domain = generator.select_domain()
+        
         # Make some terrain
         yield from self.generate_map()
         
@@ -594,6 +798,16 @@ class GameWorld:
             # Found a place for the player
             self.player.x = x
             self.player.y = y
+            
+        if not self.has_enemies():
+            # Make sure we have at least one enemy somewhere.
+            for pos in self.free_spaces_in(0, 0, self.get_map_width(), self.get_map_height(), 1):
+                # Make just one rare enemy with nothing
+                enemy_type = generator.select_object("enemy", rarity="rare", elemental_domain=self.level_domain)
+                # Buff it!
+                enemy_type["health"] *= 2
+                enemy = Enemy(pos[0], pos[1], **enemy_type)
+                self.add_object(enemy)
         
 
         
@@ -682,7 +896,7 @@ class PlayingState(GameState):
         # Keep track of log messages and their counts
         self.logs: list[tuple[str, int]] = []
                 
-        self.log("Hello World")
+        self.log(f"You enter level {self.world.level_number} of the dungeon. You start getting {self.world.level_domain} vibes.")
         
     def log(self, message: str) -> None:
         """
@@ -696,14 +910,29 @@ class PlayingState(GameState):
     
     def render_to(self, console: tcod.console.Console) -> None:       
         # Compute layout
+        STATUS_HEIGHT = 2
         LOG_HEIGHT = 4
-    
+        
+        # Clear screen
         console.clear()
-        console.draw_frame(0, 0, console.width, console.height - LOG_HEIGHT, GAME_NAME)
+        
+        # Draw the status bar to report score and current item
+        held_item = self.world.player.get_held_item()
+        if held_item is not None:
+            held_item_name = held_item.indefinite_name()
+        else:
+            held_item_name = "(nothing)"
+        console.print_box(0, 0, console.width, STATUS_HEIGHT, f"Item (q/e): {held_item_name}", alignment=tcod.libtcodpy.LEFT)
+        console.print_box(0, STATUS_HEIGHT - 1, console.width, STATUS_HEIGHT, f"{self.world.player.value} gp {self.world.player.health}/{self.world.player.max_health} HP", alignment=tcod.libtcodpy.LEFT)
+        
+        
+        
+        # Frame the world
+        console.draw_frame(0, STATUS_HEIGHT, console.width, console.height - LOG_HEIGHT - STATUS_HEIGHT, GAME_NAME)
         
         # Draw a world view inset in the frame
-        self.world.draw(console, 1, 1, console.width - 2, console.height - LOG_HEIGHT - 2)
-        
+        self.world.draw(console, 1, STATUS_HEIGHT + 1, console.width - 2, console.height - LOG_HEIGHT - STATUS_HEIGHT - 2)
+ 
         # Draw the log messages
         log_start_height = console.height - LOG_HEIGHT
         for log_message, log_count in reversed(self.logs):
@@ -712,7 +941,7 @@ class PlayingState(GameState):
                 # Duplicate messages are expressed with counts
                 log_message += f" x{log_count}"
             console.print(0, log_start_height, "•")
-            log_start_height += console.print_box(1, log_start_height, console.width, LOG_HEIGHT, log_message)
+            log_start_height += console.print_box(1, log_start_height, console.width - 1, LOG_HEIGHT, log_message)
             if log_start_height >= console.height:
                 break
             
@@ -745,6 +974,11 @@ class PlayingState(GameState):
         KeySym.b: (-1, 1),
         KeySym.u: (1, -1),
         KeySym.n: (1, 1),
+        # WASD keys
+        KeySym.a: (-1, 0),
+        KeySym.d: (1, 0),
+        KeySym.w: (0, -1),
+        KeySym.s: (0, 1),
     }
     
     def handle_event(self, event: Optional[tcod.event.Event]) -> Optional[GameState]:
@@ -766,9 +1000,25 @@ class PlayingState(GameState):
                     self.log("Impassable terrain!")
             elif isinstance(obstruction, Enemy):
                 # Time to fight!
-                damage = random.randint(1, 10)
-                obstruction.health -= damage
-                hit_message = f"You attack {obstruction.definite_name()} for {damage} damage!"
+                
+                weapon: Optional[Loot] = self.world.player.get_held_item()
+                if weapon is not None:
+                    damage_to_enemy, effectiveness = weapon.hit(obstruction)
+                    damage_to_player, _ = obstruction.hit(weapon)
+                else:
+                    damage_to_enemy, effectiveness = self.world.player.hit(obstruction)
+                    damage_to_player, _ = obstruction.hit(self.world.player)
+                
+                obstruction.health = max(0, obstruction.health - damage_to_enemy)
+                self.world.player.health = max(0, self.world.player.health - damage_to_player)
+                # Add a space around the effectiveness
+                effectiveness = "  " + effectiveness + (" " if effectiveness != "" else "")
+                if weapon is not None:
+                    hit_message = f"You{effectiveness}attack {obstruction.definite_name()} with {weapon.definite_name()} for {damage_to_enemy} damage!"
+                else:
+                    hit_message = f"You{effectiveness}attack {obstruction.definite_name()} for {damage_to_enemy} damage!"
+                if damage_to_player > 0:
+                    hit_message += f" You take {damage_to_player}!"
                 if obstruction.health > 0:
                     hit_message += f" Now {obstruction.nominative_pronoun} {obstruction.has_have} {obstruction.health}/{obstruction.max_health} HP."
                     self.log(hit_message)
@@ -781,66 +1031,105 @@ class PlayingState(GameState):
                     # Take its stuff
                     loot = random.choice(obstruction.inventory) if len(obstruction.inventory) > 0 else None
                     if loot is not None:
-                        self.world.player.inventory.append(loot)
-                        rarity_article = "a" if loot.rarity != "uncomon" else "an"
-                        self.log(f"You loot {loot.indefinite_name()}, {rarity_article} {loot.rarity} treasure.")
+                        self.world.player.acquire_loot(loot)
+                        self.log(f"You loot {loot.indefinite_name()}, worth {loot.value} gold!")
+                        if len(self.world.player.inventory):
+                            # Auto-equip the first item
+                            self.world.player.next_item()
+                            rarity_article = "a" if loot.rarity != "uncommon" else "an"
+                            self.log(f"You ready {loot.definite_name()}, {rarity_article} {loot.rarity} item of the {loot.elemental_domain} domain.")
                 
                 # Check for winning
                 if not self.world.has_enemies():
                     self.log("All enemies have been defeated!")
                     # Go to a victory state
-                    return VictoryState(self.world, self.logs)
+                    return EndGameState(self.world, self.logs, self.world.level_number + 1, self.world.player, (0, 255, 0), f"Level Cleared!\nYou beat level {self.world.level_number}!", "Next Level")
+                    
+                # But if you don't win on the last attack you lose!
+                if self.world.player.health <= 0:
+                    self.log("You have died!")
+                    return EndGameState(self.world, self.logs, 1, Player(), (255, 0, 0), f"You Lose!\nYou were defeated on level {self.world.level_number} by {obstruction.indefinite_name()}.")
+                
             else:
                 # The player is bumping something.
                 self.log(f"Your path is obstructed by {obstruction.indefinite_name()}!")
-        
+        elif isinstance(event, tcod.event.KeyDown) and event.sym in (KeySym.q, KeySym.e):
+            # Changing item
+            old_item = self.world.player.get_held_item()
+            if event.sym == KeySym.q:
+                self.world.player.previous_item()
+            elif event.sym == KeySym.e:
+                self.world.player.next_item()
+            new_item = self.world.player.get_held_item()
+            if new_item != old_item:
+                if new_item is not None:
+                    rarity_article = "a" if new_item.rarity != "uncommon" else "an"
+                    self.log(f"You ready {new_item.definite_name()}, {rarity_article} {new_item.rarity} item of the {new_item.elemental_domain} domain.")
+                else:
+                    self.log(f"You put away {old_item.definite_name()}.")
+            
         # Don't change state by default
         return None
                 
-class VictoryState(PlayingState):
+class EndGameState(PlayingState):
     """
-    Acts like the normal in-game state, but you can't play and it shows a victory banner.
+    Acts like the normal in-game state, but you can't play and it shows a banner.
     """
     
-    def __init__(self, world: GameWorld, logs: list[tuple[str, int]]) -> None:
+    def __init__(self, world: GameWorld, logs: list[tuple[str, int]], next_level: int, next_player: Player, color: tuple[int, int, int], message: str, continue_message: str = "Play Again") -> None:
         super().__init__(world)
         # Keep the passed-in logs
         self.logs += logs
+        # Remember the color to use
+        self.color = color
+        # And the message to display.
+        self.message = message
+        # And the question to ask
+        self.continue_message = continue_message
+        # Remember what level number to do next, if any
+        self.next_level = next_level
+        # And what player object to use
+        self.next_player = next_player
+        
     
     def render_to(self, console: tcod.console.Console) -> None:
         # First draw as normal
         super().render_to(console)
         
         # Then draw a big victory banner
-        BANNER_WIDTH = 20
-        BANNER_HEIGHT = 4
+        BANNER_WIDTH = 30
+        BANNER_HEIGHT = 8
         banner_x = console.width // 2 - BANNER_WIDTH // 2
         banner_y = console.height // 2 - BANNER_HEIGHT // 2
-        console.draw_frame(banner_x, banner_y, BANNER_WIDTH, BANNER_HEIGHT, decoration="╔═╗║ ║╚═╝", fg=(0, 255, 0))
-        console.print_box(banner_x + 1, banner_y + 1, BANNER_WIDTH - 2, BANNER_HEIGHT - 2, "You Win!\nPlay Again [Y/N]?", fg=(0, 255, 0), alignment=tcod.libtcodpy.CENTER)
-    
+        console.draw_frame(banner_x, banner_y, BANNER_WIDTH, BANNER_HEIGHT, decoration="╔═╗║ ║╚═╝", fg=self.color)
+        console.print_box(banner_x + 1, banner_y + 1, BANNER_WIDTH - 2, BANNER_HEIGHT - 2 - 1, self.message, fg=self.color, alignment=tcod.libtcodpy.CENTER)
+        console.print_box(banner_x + 1, banner_y + BANNER_HEIGHT - 2, BANNER_WIDTH - 2, 1, f"{self.continue_message} [Y/N]?", fg=self.color, alignment=tcod.libtcodpy.CENTER)
+        
     def handle_event(self, event: Optional[tcod.event.Event]) -> Optional[GameState]:
         if isinstance(event, tcod.event.KeyDown):
             if event.sym in (tcod.event.KeySym.ESCAPE, tcod.event.KeySym.n):
                 # Let the user quit at the end
                 raise SystemExit()
             elif event.sym == tcod.event.KeySym.y:
-                # Start a new game
-                return LoadingState()
+                # Start a new level
+                return LoadingState(self.next_level, self.next_player)
         
 class LoadingState(GameState):
     """
     State for loading the game.
     """
     
-    def __init__(self):
-        self.world = GameWorld()
+    def __init__(self, level_number: int, player: Player):
+        """
+        Make a new loading state for the gievn level, using the given player.
+        """
+        self.world = GameWorld(level_number, player)
         self.process = self.world.generate_level(ProceduralGenerator())
         self.progress = (0, 0, "Loading")
     
     def render_to(self, console: tcod.console.Console) -> None:
         console.clear()
-        console.draw_frame(0, 0, console.width, console.height, "Loading...")
+        console.draw_frame(0, 0, console.width, console.height, f"Loading Level {self.world.level_number}")
         
         bar_box_height = 3
         bar_box_width = console.width - 4
@@ -862,7 +1151,6 @@ class LoadingState(GameState):
     
     def handle_event(self, event: Optional[tcod.event.Event]) -> Optional[GameState]:
         # Make progress
-        print(f"Handle {event}")
         try:
             self.progress = self.process.send(None)
         except StopIteration:
@@ -908,8 +1196,8 @@ def force_min_size(context: tcod.context.Context) -> None:
     """
     Force the window to be at least a minimum size.
     """
-    MIN_WINDOW_WIDTH = 640
-    MIN_WINDOW_HEIGHT = 480
+    MIN_WINDOW_WIDTH = 800
+    MIN_WINDOW_HEIGHT = 600
     context.sdl_window.size = (max(context.sdl_window.size[0], MIN_WINDOW_WIDTH), max(context.sdl_window.size[1], MIN_WINDOW_HEIGHT))
     
 def force_normal_shape(context: tcod.context.Context) -> None:
@@ -945,7 +1233,7 @@ def main() -> None:
         
         def handle_queue():
             try:
-                state = LoadingState()
+                state = LoadingState(1, Player())
                 
                 while True:
                     # Main game loop

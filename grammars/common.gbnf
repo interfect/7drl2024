@@ -15,8 +15,17 @@ ws ::= [ \t\n]*
 
 thingName ::= q fewWords q
 
-fewWords ::= word | word " " word | word " " word " " word | word " " word " " word " " word | word " " word " " word " " word " " word
-word ::= [a-z] [-a-z]*
+fewWords ::= firstword | firstword " " word | firstword " " word " " word | firstword " " word " " word " " word | firstword " " word " " word " " word " " word
+
+firstword ::= normalword
+word ::= anyword | allcapsanyword
+
+allcapsnormalword ::= [A-SU-Z] [-A-Z] [A-Z] | [A-Z] [-A-GI-Z] [A-Z] | [A-Z] [-A-Z] [A-DF-Z] | [B-Z] | [B-Z] [A-Z] | [A-Z] [A-MO-Z] | [A-Z] [-A-Z] [-A-Z] [-A-Z]* [A-Z]
+allcapsanyword ::= [A-Z] | [A-Z] [-A-Z]* [A-Z]
+
+normalword ::= [a-su-z] [-a-z] [a-z] | [a-z] [-a-gi-z] [a-z] | [a-z] [-a-z] [a-df-z] | [b-z] | [b-z] [a-z] | [a-z] [a-mo-z] | [a-z] [-a-z] [-a-z] [-a-z]* [a-z]
+anyword ::= [a-z] | [a-z][-a-z]*[a-z]
+
 
 title ::= q titleword q | q titleword " " titletail q
 titletail ::= titleword | titlemiddleword " " titletail | titleword " " titletail
@@ -35,8 +44,8 @@ lightcolorcode ::= q "#" [a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f] q | q "#"
 
 string ::= q ([^"\\]*) q
 
-char ::= q quotedchar q
-quotedchar ::= [-a-zA-Z0-9.,/#!$%^&*;:{}=_`~()@+?><[\]+'] | "\\\"" | "\\\\"
+char ::= q quotedcharnotdotnotquote q
+quotedcharnotdotnotquote ::= [-a-zA-Z0-9,/#!$%^&*;:{}=_`~()@+?><[\]+] | "\\\\"
 
 boolean ::= "true" | "false"
 number ::= [0-9]+ "."? [0-9]*
