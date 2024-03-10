@@ -61,7 +61,7 @@ class ProceduralGenerator:
             "hole in the ground"
         ],
         "loot": [
-            "Excalibur",
+            "double-ended sword",
             "pointy rock",
             "small pile of gold",
             "portable hole"
@@ -83,31 +83,34 @@ class ProceduralGenerator:
         """
         Download the model file we are meant to use.
         
+        Doesn't download it twice.
+        
         Yields progress events.
         """
+        
+        
         
         source_url = self.MODEL_URLS[self.MODEL]
         dest_path = self.MODEL
         
         MEGABYTE = 1024 * 1024
         
-        with open(dest_path + ".tmp", "wb") as out_handle:
-            yield (0, 0, f"Download {dest_path}")
-            with urlopen(source_url) as handle:
-                expected_length = int(handle.headers.get('Content-Length'))
-                bytes_read = 0
-                while True:
-                    yield (bytes_read // MEGABYTE, expected_length // MEGABYTE, f"Download {dest_path}")
-                    buffer = handle.read(MEGABYTE)
-                    if len(buffer) == 0:
-                        # Hit EOF
-                        break
-                    bytes_read += len(buffer)
-                    out_handle.write(buffer)
-                yield (bytes_read // MEGABYTE, expected_length // MEGABYTE, f"Download {dest_path}")
-                    
-        os.rename(dest_path + ".tmp", dest_path)
-                    
+        if not os.path.exists(dest_path):
+            with open(dest_path + ".tmp", "wb") as out_handle:
+                yield (0, 0, f"Downloading {dest_path}")
+                with urlopen(source_url) as handle:
+                    expected_length = int(handle.headers.get('Content-Length'))
+                    bytes_read = 0
+                    while True:
+                        yield (bytes_read // MEGABYTE, expected_length // MEGABYTE, f"Downloading {dest_path}")
+                        buffer = handle.read(MEGABYTE)
+                        if len(buffer) == 0:
+                            # Hit EOF
+                            break
+                        bytes_read += len(buffer)
+                        out_handle.write(buffer)
+                    yield (bytes_read // MEGABYTE, expected_length // MEGABYTE, f"Downloading {dest_path}") 
+            os.rename(dest_path + ".tmp", dest_path)             
     
     def get_model(self) -> Llama:
         """
@@ -151,8 +154,12 @@ class ProceduralGenerator:
         # Run the model
         result = self.get_model()(prompt, grammar=self.get_grammar(object_type), stop=["\n\n"], max_tokens=-1, mirostat_mode=2)
         
+        result_text = result["choices"][0]["text"]
+        
+        print(result_text)
+        
         # Load up whatever keys it came up with
-        new_keys = json.loads("{" + result["choices"][0]["text"])
+        new_keys = json.loads("{" + result_text)
         
         # Combine the keys together
         obj = dict(features)
@@ -183,8 +190,13 @@ class ProceduralGenerator:
         if not os.path.exists(path):
             # Make directory
             os.makedirs(os.path.dirname(path), exist_ok=True)
+            
+            # Pick some traditionally-rolled stats
+            elemental_domain = random.choice(["normal", "earth", "air", "fire", "water", "good", "evil", "business"])
+            
             # Invent the object type
-            obj = self.invent_object(object_type, rarity=rarity)
+            obj = self.invent_object(object_type, rarity=rarity, elemental_domain=elemental_domain)
+            
             # And save it
             json.dump(obj, open(path, 'w'))
         
@@ -255,6 +267,7 @@ class WorldObject:
         definite_article: Optional[str] = None,
         nominative_pronoun: str = "it",
         rarity: str = "common",
+        elemental_domain: str = "normal",
         z_layer: int = 0
     ) -> None:
         
@@ -263,6 +276,9 @@ class WorldObject:
         self.symbol = symbol
         self.fg = self.hex_to_rgb(color)
         self.name = name
+        if self.name is None:
+            # Oops we rolled a none name with a bad grammar
+            self.name = "(unnamed)"
         self.indefinite_article = indefinite_article
         self.definite_article = definite_article
         self.nominative_pronoun = nominative_pronoun
@@ -270,6 +286,7 @@ class WorldObject:
         self.has_have = self.HAS_HAVE[nominative_pronoun]
         self.is_are = self.IS_ARE[nominative_pronoun]
         self.rarity = rarity
+        self.elemental_domain = elemental_domain
         self.z_layer = z_layer
     
     def hex_to_rgb(self, hex_code: str) -> tuple[int, int, int]:
@@ -296,7 +313,7 @@ class WorldObject:
         """
         
         parts = []
-        if self.indefinite_article:
+        if self.indefinite_article is not None:
             parts.append(self.indefinite_article)
         parts.append(self.name)
         return " ".join(parts)
@@ -328,7 +345,7 @@ class Terrain(IntEnum):
     WALL = 2
     
     @staticmethod
-    to_symbol(value: "Terrain") -> str:
+    def to_symbol(value: "Terrain") -> str:
         """
         Get the symbol to represent a kind of terrain.
         """
@@ -358,6 +375,9 @@ class GameWorld:
         
         # Holds a map of terrins
         self.terrain: list[list[Terrain]] = []
+        
+        # Holds a list of room x, y, width, height tuples
+        self.rooms: list[tuple[int, int, int, int]] = []
     
     def clear_terrain(self, x: int, y: int) -> None:
         """
@@ -366,47 +386,53 @@ class GameWorld:
         
         self.terrain = [[Terrain.VOID for _ in range(y)] for __ in range(x)]
         
-    def get_map_width() -> int:
+    def get_map_width(self) -> int:
         """
         Get the width of the current map.
         """
         return len(self.terrain)
         
-    def get_map_height() -> int:
+    def get_map_height(self) -> int:
         """
         Get the height of the current map.
         """
         return len(self.terrain[0]) if self.terrain else 0
         
-    def set_terrain(self, x: int, y: int, value: Terrain) -> None:
+    def set_terrain(self, x: int, y: int, value: Terrain, if_value: Optional[Terrain] = None) -> None:
         """
         Set a terrain cell to the given value.
+        
+        If if_value is set, only changes from the given terrain type.
         """
+        if if_value is None or self.terrain[x][y] == if_value:
+            self.terrain[x][y] = value
         
-        self.terrain[x][y] = value
-        
-    def set_terrain_region(x: int, y: int, width: int, height: int, value: Terrain) -> None:
+    def set_terrain_region(self, x: int, y: int, width: int, height: int, value: Terrain, if_value: Optional[Terrain] = None) -> None:
         """
         Set terrain in an area to the given type.
+        
+        If if_value is set, only changes from the given terrain type.
         """
         
         for i in range(x, x + width):
             for j in range (y, y + height):
-                self.set_terrain(i, j, value)
+                self.set_terrain(i, j, value, if_value=if_value)
                 
-    def set_terrain_walls(x: int, y: int, width: int, height: int, value: Terrain) -> None:
+    def set_terrain_walls(self, x: int, y: int, width: int, height: int, value: Terrain, if_value: Optional[Terrain] = None) -> None:
         """
         Set terrain around the edges of an area to the given type.
+        
+        If if_value is set, only changes from the given terrain type.
         """
         
         # Just draw 4 wall lines
-        self.set_terrain_region(x, y, width, 1)
-        self.set_terrain_region(x, y + height - 1, width, 1)
-        self.set_terrain_region(x, y, 1, height)
-        self.set_terrain_region(x + width - 1, y, 1, height)
+        self.set_terrain_region(x, y, width, 1, value, if_value=if_value)
+        self.set_terrain_region(x, y + height - 1, width, 1, value, if_value=if_value)
+        self.set_terrain_region(x, y, 1, height, value, if_value=if_value)
+        self.set_terrain_region(x + width - 1, y, 1, height, value, if_value=if_value)
         
         
-    def get_terrain(self, x: int, y: int) -> Terrain:
+    def terrain_at(self, x: int, y: int) -> Terrain:
         """
         Get the value of the terrain at a location, which may not be in the terrain bounds.
         """
@@ -415,7 +441,7 @@ class GameWorld:
             return Terrain.VOID
         if y < 0 or y >= len(self.terrain[x]):
             return Terrain.VOID
-        return terrain[x][y]
+        return self.terrain[x][y]
         
     @types.coroutine
     def generate_map(self) -> Generator[tuple[int, int, str], None, None]:
@@ -426,44 +452,118 @@ class GameWorld:
         
         It yields progress tuples of completed out of total, and progress message.
         """
+
+        yield (0, 0, "Generating terrain")
         
-        MAP_WIDTH = 256
-        MAP_HEIGHT = 256
-        
-        yield (0, 0, "Generate terrain")
+        MAP_WIDTH = 32
+        MAP_HEIGHT = 32
+        MAP_LEVELS = 5
+        ROOM_MIN_INTERIOR_SIZE = 3
+        ROOM_CHANCE = 0.5
+        self.clear_terrain(MAP_WIDTH, MAP_HEIGHT)
+        self.rooms = []
         
         bsp = tcod.bsp.BSP(x=0, y=0, width=MAP_WIDTH, height=MAP_HEIGHT)
         bsp.split_recursive(
-            depth=6,
-            min_width=3,
-            min_height=3,
+            depth=MAP_LEVELS,
+            min_width=ROOM_MIN_INTERIOR_SIZE + 1,
+            min_height=ROOM_MIN_INTERIOR_SIZE + 1,
             max_horizontal_ratio=1.5,
             max_vertical_ratio=1.5
         )
         
-        node_total = len(bsp.pre_order())
+        node_total = len(list(bsp.post_order()))
         node_count = 0
-        yield (node_count, node_total, "Generate terrain")
+        yield (node_count, node_total, "Generating terrain")
 
-        for node in bsp.pre_order():
-            # Pre-order traverse the tree, so do children and then parents
+        for node in bsp.post_order():
+            # Post-order visits the parent after the children, so we make rooms and then dig to connect them.
             if node.children:
                 # Connect the two child rooms somehow
                 node1, node2 = node.children
-                if node.horizontal:
+                center1 = (node1.x + node1.width // 2, node1.y + node1.height // 2)
+                center2 = (node2.x + node2.width // 2, node2.y + node2.height // 2)
+                if not node.horizontal:
+                    # This node is not from a horizontal split itself, so its children will be.
                     # node1 is left of node2
-                    self.set_terrain_region(node1.x + 1, node1.y + node1.height // 2, node2.x - node1.x, 1, Terrain.FLOOR)
+                    self.set_terrain_walls(center1[0] - 1, center1[1] - 1, center2[0] - center1[0] + 2, 3, Terrain.WALL, if_value=Terrain.VOID)
+                    self.set_terrain_region(center1[0], center1[1], center2[0] - center1[0], 1, Terrain.FLOOR)
                 else:
                     # node1 is above node2
-                    self.set_terrain_region(node1.x + node1.width // 2, node1.y, 1, node2.y - node1.y, Terrain.FLOOR)
+                    self.set_terrain_walls(center1[0] - 1, center1[1] - 1, 3, center2[1] - center1[1] + 2, Terrain.WALL, if_value=Terrain.VOID)
+                    self.set_terrain_region(center1[0], center1[1], 1, center2[1] - center1[1], Terrain.FLOOR)
             else:
-                # Make a room out of this node.
-                self.set_terrain_region(node.x + 1, node.y + 1, node.width - 1, node.height - 1, Terrain.FLOOR)
-                self.set_terrain_walls(node.x, node.y, node.width, node.height, Terrain.WALL)
+                # Maybe make a room out of this node.
+                if random.random() < ROOM_CHANCE:
+                    # Carve out this room
+                    self.set_terrain_region(node.x + 1, node.y + 1, node.width - 2, node.height - 2, Terrain.FLOOR)
+                    self.set_terrain_walls(node.x, node.y, node.width, node.height, Terrain.WALL)
+                    
+                    # And remember it to populate. 
+                    self.rooms.append((node.x + 1, node.y + 1, node.width - 2, node.height - 2))
+                # Otherwise leave it alone and just connect to its center
             node_count += 1
-            yield (node_count, node_total, "Generate terrain")
+            yield (node_count, node_total, "Generating terrain")
             
-                
+    
+    def free_spaces_in(self, x: int, y: int, width: int, height: int, count: int) -> Generator[tuple[int, int], None, None]:
+        """
+        Get the given number of free spaces in the given region.
+        """
+        
+        found = 0
+        missed = 0
+        while found < count:
+            chosen_x = random.randrange(x, x + width)
+            chosen_y = random.randrange(y, y + height)
+            if self.free_space_at(chosen_x, chosen_y):
+                yield (chosen_x, chosen_y)
+                found += 1
+            else:
+                missed += 1
+                if missed > 100 * count:
+                    raise RuntimeError(f"Extreme bad luck in {x}, {y}, {width}, {height}")
+    
+    @types.coroutine  
+    def populate_room(self, x: int, y: int, width: int, height: int, generator: ProceduralGenerator) -> Generator[tuple[int, int, str], None, None]:
+        """
+        Place some objects of the gievn type in the given area.
+        """
+        
+        print(f"Populate {x}, {y}, {width}, {height}")
+        
+        # We keep obstacles walls to stay out of the doors.
+        free_spaces = (width - 2) * (height - 2)
+        
+        # Make obstacles
+        object_count = 0
+        desired_object_count = random.choice([0, 0, 1, 3])
+        if free_spaces >= desired_object_count:
+            yield (object_count, desired_object_count, "Making obstacles")
+            for pos in self.free_spaces_in(x + 1, y + 1, width - 2, height - 2, desired_object_count):
+                # Put something here
+                object_type = generator.select_object("obstacle")
+                self.add_object(WorldObject(pos[0], pos[1], **object_type))
+                object_count += 1
+                yield (object_count, desired_object_count, "Making obstacles")
+        
+        
+        # Enemies can block doors
+        free_spaces = width * height - object_count
+        
+        # Make enemies
+        enemy_count = 0
+        desired_enemy_count = random.choice([0, 0, 0, 0, 1, 1, 2])
+        if free_spaces >= desired_enemy_count:
+            yield (enemy_count, desired_enemy_count, "Making enemies")
+            for pos in self.free_spaces_in(x, y, width, height, desired_enemy_count):
+                enemy_type = generator.select_object("enemy")
+                enemy = Enemy(pos[0], pos[1], **enemy_type)
+                yield (enemy_count, desired_enemy_count, "Making enemies")
+                enemy.inventory.append(WorldObject(pos[0], pos[1], **generator.select_object("loot")))
+                self.add_object(enemy)
+                enemy_count += 1
+                yield (enemy_count, desired_enemy_count, "Making enemies")
     
     @types.coroutine    
     def generate_level(self, generator: ProceduralGenerator) -> Generator[tuple[int, int, str], None, None]:
@@ -478,50 +578,25 @@ class GameWorld:
         # Make sure the model is available
         yield from generator.download_model()
         
+        # Throw out the old objects, except the player who is here
+        self.objects = [self.player]
+        
         # Make some terrain
         yield from self.generate_map()
         
-        # Throw out the old objects, except the player who is here
-        self.objects = [self.player]
-        # Put the player somewhere
-        while True:
-            x = random.randrange(0, self.get_map_width())
-            y = random.randrange(0, self.get_map_height())
-            if self.free_space_at(x, y):
-                # Found a place for the player
-                self.player.x = x
-                self.player.y = y
-                break
-
-        # Make obstacles
-        object_count = 0
-        desired_object_count = random.randint(5, 7)
-        yield (object_count, desired_object_count, "Making objects")
-        while object_count < desired_object_count:
-            x = random.randrange(0, self.get_map_width())
-            y = random.randrange(0, self.get_map_height())
-            if self.free_space_at(x, y):
-                # Put something here
-                object_type = generator.select_object("obstacle")
-                self.add_object(WorldObject(x, y, **object_type))
-                object_count += 1
-                yield (object_count, desired_object_count, "Making objects")
+        for room_number, room in enumerate(self.rooms):
+            # Put stuff in each room
+            for (done, total, message) in self.populate_room(room[0], room[1], room[2], room[3], generator):
+                yield (done, total, message + f" in room {room_number + 1}/{len(self.rooms)}")
         
-        # Make enemies
-        enemy_count = 0
-        desired_enemy_count = random.randint(2, 5)
-        yield (enemy_count, desired_enemy_count, "Making enemies")
-        while enemy_count < desired_enemy_count:
-            x = random.randrange(0, self.get_map_width())
-            y = random.randrange(0, self.get_map_height())
-            if self.free_space_at(x, y):
-                enemy_type = generator.select_object("enemy")
-                enemy = Enemy(x, y, **enemy_type)
-                yield (enemy_count, desired_enemy_count, "Making enemies")
-                enemy.inventory.append(WorldObject(0, 0, **generator.select_object("loot")))
-                self.add_object(enemy)
-                enemy_count += 1
-                yield (enemy_count, desired_enemy_count, "Making enemies")
+        # Put the player somewhere
+        for x, y in self.free_spaces_in(0, 0, self.get_map_width(), self.get_map_height(), 1):
+            # Found a place for the player
+            self.player.x = x
+            self.player.y = y
+        
+
+        
     
     def object_at(self, x: int, y: int) -> Optional[WorldObject]:
         """
@@ -579,8 +654,7 @@ class GameWorld:
             world_x = x_in_view + view_x
             for y_in_view in range(height):
                 world_y = y_in_view + view_y
-                console.print(x_in_view + x, y_in_view + y, Terrain.to_symbol(self.get_terrain(world_x, world_y)))
-                
+                console.print(x_in_view + x, y_in_view + y, Terrain.to_symbol(self.terrain_at(world_x, world_y)))
         
         for to_render in self.objects:
             # Draw all the objects
@@ -683,7 +757,7 @@ class PlayingState(GameState):
             
             obstruction = self.world.object_at(next_x, next_y)
             if obstruction is None:
-                terrain = self.world.get_terrain(x, y)
+                terrain = self.world.terrain_at(next_x, next_y)
                 if terrain == Terrain.FLOOR:
                     # You can just move there
                     self.world.player.x = next_x

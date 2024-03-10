@@ -13,10 +13,10 @@ and ::= "," line
 q ::= "\""
 ws ::= [ \t\n]*
 
-thingName ::= fewWords | title
+thingName ::= q fewWords q
 
-fewWords ::= word | word " " word | word " " word " " word
-word ::= [a-z] [a-z]*
+fewWords ::= word | word " " word | word " " word " " word | word " " word " " word " " word | word " " word " " word " " word " " word
+word ::= [a-z] [-a-z]*
 
 title ::= q titleword q | q titleword " " titletail q
 titletail ::= titleword | titlemiddleword " " titletail | titleword " " titletail
