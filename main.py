@@ -587,7 +587,7 @@ class GameWorld:
         for room_number, room in enumerate(self.rooms):
             # Put stuff in each room
             for (done, total, message) in self.populate_room(room[0], room[1], room[2], room[3], generator):
-                yield (done, total, message + f" in room {room_number + 1}/{len(self.rooms)}")
+                yield (room_number, len(self.rooms), message + f" ({done +  1}/{total}) in room {room_number + 1}/{len(self.rooms)}")
         
         # Put the player somewhere
         for x, y in self.free_spaces_in(0, 0, self.get_map_width(), self.get_map_height(), 1):
@@ -862,6 +862,7 @@ class LoadingState(GameState):
     
     def handle_event(self, event: Optional[tcod.event.Event]) -> Optional[GameState]:
         # Make progress
+        print(f"Handle {event}")
         try:
             self.progress = self.process.send(None)
         except StopIteration:
@@ -957,7 +958,8 @@ def main() -> None:
                     except Empty:
                         event = None
                     
-                    if isinstance(event, tcod.event.Quit):
+                    if isinstance(event, tcod.event.Quit) or isinstance(event, tcod.event.WindowEvent) and event.type == "WindowClose":
+                        print("Stopping worker thread")
                         return
                     else:
                         next_state = state.handle_event(event)
@@ -983,8 +985,23 @@ def main() -> None:
                 context.present(console, keep_aspect=True)
             
             for event in tcod.event.wait(timeout=0.1):
+                if isinstance(event, tcod.event.Quit) or isinstance(event, tcod.event.WindowEvent) and event.type == "WindowClose":
+                    # Flush the existing queue so we can quit right away
+                    try:
+                        while True:
+                            event_queue.get(block=False)
+                    except Empty:
+                        pass
                 event_queue.put(event)
-                if isinstance(event, tcod.event.Quit):
+                if isinstance(event, tcod.event.Quit) or isinstance(event, tcod.event.WindowEvent) and event.type == "WindowClose":
+                    while worker_thread.is_alive():
+                        # Keep the window responsive while the worker terminates
+                        with console_manager.with_console() as console:
+                            console.clear()
+                            console.print(0, 0, "Quitting...")
+                            context.present(console, keep_aspect=True)
+                        for event in tcod.event.wait(timeout=0.1):
+                            pass
                     worker_thread.join()
                     sys.exit(0)
                 elif isinstance(event, tcod.event.WindowResized):
