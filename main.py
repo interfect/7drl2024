@@ -99,6 +99,43 @@ class ProceduralGenerator:
         ("business", "evil")
     }
     
+    # What symbols represent the elemental domains?
+    DOMAIN_SYMBOLS = {
+        "normal": "○",
+        "earth": "♦",
+        "air": "♠",
+        "fire": "♣",
+        "water": "♥",
+        "good": "▲",
+        "evil": "▼",
+        "business": "☼"
+    }
+    # What colors represent the elemental domains?
+    DOMAIN_COLORS = {
+        "normal": (255, 255, 255),
+        "earth": (16, 160, 64),
+        "air": (255, 255, 64),
+        "fire": (255, 64, 64),
+        "water": (16, 64, 160),
+        "good": (0, 0, 127),
+        "evil": (127, 0, 0),
+        "business": (0, 127, 0)
+    }
+    # What symbols represent the rarity levels?
+    RARITY_SYMBOLS = {
+        "common": "▬",
+        "uncommon": "♪",
+        "rare": "♫",
+        "ultra-rare": "‼"
+    }
+    # What colors represent the rarity levels?
+    RARITY_COLORS = {
+        "common": (255, 255, 255),
+        "uncommon": (0, 255, 0),
+        "rare": (255, 127, 0),
+        "ultra-rare": (255, 0, 255)
+    }
+    
     @classmethod
     def strong_against(cls, domain_a: str, domain_b: str) -> bool:
         """
@@ -225,14 +262,16 @@ class ProceduralGenerator:
         Select a rarity level for an item at the given dungeon level.
         """
         
-        return random.choice(["common"] * 10 + ["uncommon"] * 3 + ["rare"] * level_number)
-        
-        
+        if random.random() < 0.01:
+            return "ultra-rare"
+        else:
+            return random.choice(["common"] * 15 + ["uncommon"] * 4 + ["rare"] * level_number)
+       
     def select_object(self, object_type: str, rarity: str, elemental_domain: Optional[str] = None) -> dict:
         """
         Get a dict defining an object of the given type and rarity.
         
-        Rarity can be "common", "uncommon", or "rare".
+        Rarity can be "common", "uncommon", "rare", or "ultra-rare".
         
         All types have:
             "symbol",
@@ -253,8 +292,14 @@ class ProceduralGenerator:
             # Pick an elemental domain if not provided
             elemental_domain = self.select_domain()
         
-        # Within each we have 3 types
-        type_num = random.randrange(0, 3)
+        # Within each we have some number of types.
+        type_count = {
+            "common": 7,
+            "uncommon": 5,
+            "rare": 3,
+            "ultra-rare": 1
+        }[rarity]
+        type_num = random.randrange(0, type_count)
         
         # Where should that file be?
         path = os.path.join("objects", object_type, elemental_domain, rarity, f"{type_num}.json")
@@ -404,6 +449,34 @@ class WorldObject:
         parts.append(self.name)
         return " ".join(parts)
         
+    def rarity_symbol(self) -> str:
+        """
+        Get a symbol denoting the object's rarity level.
+        """
+        
+        return ProceduralGenerator.RARITY_SYMBOLS[self.rarity]
+        
+    def rarity_color(self) -> tuple[int, int, int]:
+        """
+        Get a color denoting the object's rarity level.
+        """
+        
+        return ProceduralGenerator.RARITY_COLORS[self.rarity]
+        
+    def domain_symbol(self) -> str:
+        """
+        Get a symbol denoting the object's elemental domain.
+        """
+        
+        return ProceduralGenerator.DOMAIN_SYMBOLS[self.elemental_domain]
+        
+    def domain_color(self) -> tuple[int, int, int]:
+        """
+        Get a color denoting the object's elemental domain.
+        """
+        
+        return ProceduralGenerator.DOMAIN_COLORS[self.elemental_domain]
+        
     def hit(self, other: "GameObject") -> tuple[int, str]:
         """
         Hit one game object with another.
@@ -422,7 +495,8 @@ class WorldObject:
             max_damage = {
                 "common": 8,
                 "uncommon": 10,
-                "rare": 12
+                "rare": 12,
+                "ultra-rare": 20
             }[self.rarity]
         
         base_damage = random.randint(1, max_damage)
@@ -448,6 +522,14 @@ class Loot(WorldObject):
         
         # Save the gold value
         self.value = value
+        
+    def ready_message(self) -> str:
+        """
+        Return the message to use when the player readies the item.
+        """
+    
+        rarity_article = "an" if self.rarity.startswith("u") else "a"
+        return f"You ready {self.definite_name()}, {rarity_article} {self.rarity} item of the {self.elemental_domain} domain."
         
 class Enemy(WorldObject):
     """
@@ -834,8 +916,8 @@ class GameWorld:
         if not self.has_enemies():
             # Make sure we have at least one enemy somewhere.
             for pos in self.free_spaces_in(0, 0, self.get_map_width(), self.get_map_height(), 1):
-                # Make just one rare enemy with nothing
-                enemy_type = generator.select_object("enemy", rarity="rare", elemental_domain=self.level_domain)
+                # Make just one ultra-rare enemy with nothing
+                enemy_type = generator.select_object("enemy", rarity="ultra-rare", elemental_domain=self.level_domain)
                 # Buff it!
                 enemy_type["health"] *= 2
                 enemy = Enemy(pos[0], pos[1], **enemy_type)
@@ -954,7 +1036,12 @@ class PlayingState(GameState):
             held_item_name = held_item.indefinite_name()
         else:
             held_item_name = "(nothing)"
-        console.print_box(0, 0, console.width, STATUS_HEIGHT, f"Item (q/e/f): {held_item_name}", alignment=tcod.libtcodpy.LEFT)
+        console.print_box(0, 0, console.width, STATUS_HEIGHT, f"Item (q/e/f): XX {held_item_name}", alignment=tcod.libtcodpy.LEFT)
+        # Print a colorful quick reference for rarity and element
+        QUICKREF_START=14
+        if held_item is not None:
+            console.print(QUICKREF_START, 0, held_item.domain_symbol(), fg=held_item.domain_color())
+            console.print(QUICKREF_START + 1, 0, held_item.rarity_symbol(), fg=held_item.rarity_color())
         console.print_box(0, STATUS_HEIGHT - 1, console.width, STATUS_HEIGHT, f"{self.world.player.health}/{self.world.player.max_health} HP", fg=(127, 0, 0), alignment=tcod.libtcodpy.RIGHT)
         console.print_box(0, STATUS_HEIGHT - 1, console.width, STATUS_HEIGHT, f"Cash: ${self.world.player.money}", fg=(0, 127, 0), alignment=tcod.libtcodpy.LEFT)
          
@@ -1030,8 +1117,7 @@ class PlayingState(GameState):
                     # You can just move there
                     self.world.player.x = next_x
                     self.world.player.y = next_y
-                else:
-                    self.log("Impassable terrain!")
+                # Otherwise silently stay put
             elif isinstance(obstruction, Enemy):
                 # Time to fight!
                 
@@ -1067,11 +1153,11 @@ class PlayingState(GameState):
                     if loot is not None:
                         self.world.player.acquire_loot(loot)
                         rarity_article = "a" if loot.rarity != "uncommon" else "an"
-                        self.log(f"You loot {loot.indefinite_name()}, {rarity_article} {loot.rarity} treasure worth ${loot.value}!")
+                        self.log(f"You loot {loot.indefinite_name()}, {rarity_article} {loot.rarity} {loot.elemental_domain} treasure worth ${loot.value}!")
                         if len(self.world.player.inventory) == 1:
                             # Auto-equip the first item
                             self.world.player.next_item()
-                            self.log(f"You ready {loot.definite_name()}, {rarity_article} {loot.rarity} item of the {loot.elemental_domain} domain.")
+                            self.log(f"You decide to fight with {loot.accusative_pronoun}.")
                 
                 # Check for winning
                 if not self.world.has_enemies():
@@ -1097,8 +1183,7 @@ class PlayingState(GameState):
             new_item = self.world.player.get_held_item()
             if new_item != old_item:
                 if new_item is not None:
-                    rarity_article = "a" if new_item.rarity != "uncommon" else "an"
-                    self.log(f"You ready {new_item.definite_name()}, {rarity_article} {new_item.rarity} item of the {new_item.elemental_domain} domain.")
+                    self.log(new_item.ready_message())
                 else:
                     self.log(f"You put away {old_item.definite_name()}.")
         elif isinstance(event, tcod.event.KeyDown) and event.sym == KeySym.f:
@@ -1180,7 +1265,7 @@ class SellDialogState(GameState):
         banner_x = console.width // 2 - BANNER_WIDTH // 2
         banner_y = console.height // 2 - BANNER_HEIGHT // 2
         
-        console.print_box(0, 0, console.width, banner_y, "Honest Aerith's Transdimensional Pawnbroker", fg=(255, 0, 0))
+        console.print_box(1, 1, console.width - 2, banner_y, "Honest Aerith's Transdimensional Pawnbroker", fg=(255, 0, 0))
         
         console.draw_frame(banner_x, banner_y, BANNER_WIDTH, BANNER_HEIGHT, decoration="+-+| |+-+", fg=color)
         console.print_box(banner_x + 1, banner_y + 1, BANNER_WIDTH - 2, BANNER_HEIGHT - 2 - 1, message, fg=color, alignment=tcod.libtcodpy.LEFT)
@@ -1197,6 +1282,10 @@ class SellDialogState(GameState):
                     # Sell the item
                     self.world.player.remove_loot(self.to_sell)
                     self.world.player.money += self.to_sell.value
+                    adjective = random.choice(["quick", "cool", "cheeky", "slick"])
+                    self.return_state.log(f"You make a {adjective} ${self.to_sell.value} by fencing {self.to_sell.definite_name()}.")
+                    if self.world.player.get_held_item() is not None:
+                        self.return_state.log(self.world.player.get_held_item().ready_message())
                 # Go back
                 return self.return_state
         

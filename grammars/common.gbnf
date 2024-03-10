@@ -18,12 +18,12 @@ thingName ::= q fewWords q
 fewWords ::= firstword | firstword " " word | firstword " " word " " word | firstword " " word " " word " " word | firstword " " word " " word " " word " " word
 
 firstword ::= normalword
-word ::= anyword | allcapsanyword
+word ::= anyword
 
-allcapsnormalword ::= [A-SU-Z] [-A-Z] [A-Z] | [A-Z] [-A-GI-Z] [A-Z] | [A-Z] [-A-Z] [A-DF-Z] | [B-Z] | [B-Z] [A-Z] | [A-Z] [A-MO-Z] | [A-Z] [-A-Z] [-A-Z] [-A-Z]* [A-Z]
+allcapsnormalword ::= [A-SU-Z] [A-Z] [A-Z] | [A-Z] [A-GI-Z] [A-Z] | [A-Z] [A-Z] [A-DF-Z] | [B-Z] | [B-Z] [A-Z] | [A-Z] [A-MO-Z] | [A-Z] [-A-Z] [A-Z] [-A-Z]* [A-Z]
 allcapsanyword ::= [A-Z] | [A-Z] [-A-Z]* [A-Z]
 
-normalword ::= [a-su-z] [-a-z] [a-z] | [a-z] [-a-gi-z] [a-z] | [a-z] [-a-z] [a-df-z] | [b-z] | [b-z] [a-z] | [a-z] [a-mo-z] | [a-z] [-a-z] [-a-z] [-a-z]* [a-z]
+normalword ::= [a-su-z] [a-z] [a-z] | [a-z] [a-gi-z] [a-z] | [a-z] [a-z] [a-df-z] | [b-z] | [b-z] [a-z] | [a-z] [a-mo-z] | [a-z] [a-z] [-a-z] [a-z]* [a-z]
 anyword ::= [a-z] | [a-z][-a-z]*[a-z]
 
 
