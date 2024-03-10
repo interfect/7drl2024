@@ -7,7 +7,7 @@ The tedium of **Business**?
 
 Then you're ready to play *False Ghost*.
 
-I saw a (possibly aprcryphal) list of 7DRL game requirements that said that a game needed a minimal number of enemy types to participate.
+I saw a (possibly apocryphal) list of 7DRL game requirements that said that a game needed a minimal number of enemy types to participate.
 So I made this.
 This game has no enemy types, item types, or obstacle types in it.
 It invents them all as you play.
@@ -66,5 +66,7 @@ The game should play reasonably well with:
 
 ## Credits
 
-Game icon in `icon.ico` is "[Lantern, lamp, flame, lightning, fire, burning, night, adventure, game Icon](https://icon-icons.com/icon/lantern-lamp-flame-lightning-fire-burning-night-adventure-game/262436)" by Dian Ratri, used under CC-BY 4.0.
+The game icon in `icon.ico` is "[Lantern, lamp, flame, lightning, fire, burning, night, adventure, game Icon](https://icon-icons.com/icon/lantern-lamp-flame-lightning-fire-burning-night-adventure-game/262436)" by Dian Ratri, used under CC-BY 4.0.
+
+The font sheet used is "[Curses square 24](https://dwarffortresswiki.org/Tileset_repository#Curses_square_24.png)".
  
