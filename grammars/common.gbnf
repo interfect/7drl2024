@@ -44,8 +44,8 @@ lightcolorcode ::= q "#" [a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f] q | q "#"
 
 string ::= q ([^"\\]*) q
 
-char ::= q quotedcharnotdotnotquote q
-quotedcharnotdotnotquote ::= [-a-zA-Z0-9,/#!$%^&*;:{}=_`~()@+?><[\]+] | "\\\\"
+char ::= q quotedcharnotdotquoteat q
+quotedcharnotdotquoteat ::= [-a-zA-Z0-9,/#!$%^&*;:{}=_`~()+?><[\]+] | "\\\\"
 
 boolean ::= "true" | "false"
 number ::= [0-9]+ "."? [0-9]*

@@ -12,6 +12,8 @@ from tcod.event import KeySym
 
 from llama_cpp import Llama, LlamaGrammar
 
+from better_profanity import profanity
+
 import json
 import math
 import os
@@ -196,10 +198,16 @@ class ProceduralGenerator:
         # Add any existing keys, leaving off the closing brace and adding a trailing comma
         prompt += "\n\n```\n" + json.dumps(features, indent=2)[:-1].rstrip() + "," if len(features) > 0 else ""
         
-        # Run the model
-        result = self.get_model()(prompt, grammar=self.get_grammar(object_type), stop=["\n\n"], max_tokens=-1, mirostat_mode=2)
-        
-        result_text = result["choices"][0]["text"]
+        while True:
+            # Run the model
+            result = self.get_model()(prompt, grammar=self.get_grammar(object_type), stop=["\n\n"], max_tokens=-1, mirostat_mode=2)
+            # Grab the text
+            result_text = result["choices"][0]["text"]
+            if profanity.contains_profanity(result_text):
+                print("Model cussed us out, try again.")
+            else:
+                # Keep it
+                break
         
         print(result_text)
         
@@ -403,9 +411,12 @@ class WorldObject:
         Return the damage that should be dealt, and an adverb describing the effectiveness, like "brutally" or "futilely", or an empty string for normal.
         """
         
+        effectivenes = ""
+        
         if isinstance(self, Player):
             # Unarmed players can't do much damage
             max_damage = 4
+            effectivenes = "ineffectively"
         else:
             # Rarer items get bigger dice
             max_damage = {
@@ -416,12 +427,16 @@ class WorldObject:
         
         base_damage = random.randint(1, max_damage)
         
+        if isinstance(other, Loot):
+            # The damage is being parried.
+            base_damage = base_damage // 2
+            
         if ProceduralGenerator.strong_against(self.elemental_domain, other.elemental_domain):
             return base_damage * 2, "brutally"
         elif ProceduralGenerator.weak_against(self.elemental_domain, other.elemental_domain):
             return base_damage // 4, "futilely"
         else:
-            return base_damage, ""
+            return base_damage, effectivenes
             
 
 class Loot(WorldObject):
@@ -465,6 +480,8 @@ class Player(WorldObject):
         
         # And we have a total value score for the items we got
         self.value = 0
+        # And also money
+        self.money = 0
         
     def acquire_loot(self, loot: Loot) -> None:
         """
@@ -473,6 +490,21 @@ class Player(WorldObject):
         
         self.inventory.append(loot)
         self.value += loot.value
+        
+    def remove_loot(self, loot: Loot) -> None:
+        """
+        Add the given loot to the player's inventory.
+        """
+        
+        # Get rid of it
+        self.inventory.remove(loot)
+        
+        # Make sure we're still holding an allowed item, if any.
+        if self.held_item_index is not None and self.held_item_index >= len(self.inventory):
+            if len(self.inventory) == 0:
+                self.held_item_index = None
+            else:
+                self.held_item_index -= 1
         
     def get_held_item(self) -> Optional[Loot]:
         """
@@ -922,8 +954,10 @@ class PlayingState(GameState):
             held_item_name = held_item.indefinite_name()
         else:
             held_item_name = "(nothing)"
-        console.print_box(0, 0, console.width, STATUS_HEIGHT, f"Item (q/e): {held_item_name}", alignment=tcod.libtcodpy.LEFT)
-        console.print_box(0, STATUS_HEIGHT - 1, console.width, STATUS_HEIGHT, f"{self.world.player.value} gp {self.world.player.health}/{self.world.player.max_health} HP", alignment=tcod.libtcodpy.LEFT)
+        console.print_box(0, 0, console.width, STATUS_HEIGHT, f"Item (q/e/f): {held_item_name}", alignment=tcod.libtcodpy.LEFT)
+        console.print_box(0, STATUS_HEIGHT - 1, console.width, STATUS_HEIGHT, f"{self.world.player.health}/{self.world.player.max_health} HP", fg=(127, 0, 0), alignment=tcod.libtcodpy.RIGHT)
+        console.print_box(0, STATUS_HEIGHT - 1, console.width, STATUS_HEIGHT, f"Cash: ${self.world.player.money}", fg=(0, 127, 0), alignment=tcod.libtcodpy.LEFT)
+         
         
         
         
@@ -1012,11 +1046,11 @@ class PlayingState(GameState):
                 obstruction.health = max(0, obstruction.health - damage_to_enemy)
                 self.world.player.health = max(0, self.world.player.health - damage_to_player)
                 # Add a space around the effectiveness
-                effectiveness = "  " + effectiveness + (" " if effectiveness != "" else "")
+                effectiveness = " " + effectiveness + (" " if effectiveness != "" else "")
                 if weapon is not None:
                     hit_message = f"You{effectiveness}attack {obstruction.definite_name()} with {weapon.definite_name()} for {damage_to_enemy} damage!"
                 else:
-                    hit_message = f"You{effectiveness}attack {obstruction.definite_name()} for {damage_to_enemy} damage!"
+                    hit_message = f"You{effectiveness}attack {obstruction.definite_name()} with your bare hands for {damage_to_enemy} damage!"
                 if damage_to_player > 0:
                     hit_message += f" You take {damage_to_player}!"
                 if obstruction.health > 0:
@@ -1032,11 +1066,11 @@ class PlayingState(GameState):
                     loot = random.choice(obstruction.inventory) if len(obstruction.inventory) > 0 else None
                     if loot is not None:
                         self.world.player.acquire_loot(loot)
-                        self.log(f"You loot {loot.indefinite_name()}, worth {loot.value} gold!")
-                        if len(self.world.player.inventory):
+                        rarity_article = "a" if loot.rarity != "uncommon" else "an"
+                        self.log(f"You loot {loot.indefinite_name()}, {rarity_article} {loot.rarity} treasure worth ${loot.value}!")
+                        if len(self.world.player.inventory) == 1:
                             # Auto-equip the first item
                             self.world.player.next_item()
-                            rarity_article = "a" if loot.rarity != "uncommon" else "an"
                             self.log(f"You ready {loot.definite_name()}, {rarity_article} {loot.rarity} item of the {loot.elemental_domain} domain.")
                 
                 # Check for winning
@@ -1048,7 +1082,7 @@ class PlayingState(GameState):
                 # But if you don't win on the last attack you lose!
                 if self.world.player.health <= 0:
                     self.log("You have died!")
-                    return EndGameState(self.world, self.logs, 1, Player(), (255, 0, 0), f"You Lose!\nYou were defeated on level {self.world.level_number} by {obstruction.indefinite_name()}.")
+                    return EndGameState(self.world, self.logs, 1, Player(), (255, 0, 0), f"You Lose!\nYou were defeated on level {self.world.level_number} by {obstruction.indefinite_name()}.\nYou earned ${self.world.player.money:,}.")
                 
             else:
                 # The player is bumping something.
@@ -1067,6 +1101,9 @@ class PlayingState(GameState):
                     self.log(f"You ready {new_item.definite_name()}, {rarity_article} {new_item.rarity} item of the {new_item.elemental_domain} domain.")
                 else:
                     self.log(f"You put away {old_item.definite_name()}.")
+        elif isinstance(event, tcod.event.KeyDown) and event.sym == KeySym.f:
+            # Sell dialog
+            return SellDialogState(self.world, self.world.player.get_held_item(), self)
             
         # Don't change state by default
         return None
@@ -1113,6 +1150,55 @@ class EndGameState(PlayingState):
             elif event.sym == tcod.event.KeySym.y:
                 # Start a new level
                 return LoadingState(self.next_level, self.next_player)
+
+class SellDialogState(GameState):
+    """
+    Full-screen dialog to sell an item.
+    """
+    
+    def __init__(self, world: GameWorld, to_sell: Optional[Loot], return_state: GameState) -> None:
+        self.world = world
+        self.to_sell = to_sell
+        self.return_state = return_state
+        
+    
+    def render_to(self, console: tcod.console.Console) -> None:
+        console.clear()
+
+        if self.to_sell is None:
+            color = (255, 0, 0)
+            message = "No item selected to fence!"
+            continue_message = "OK [Y]"
+        else:
+            color = (255, 0, 0)
+            message = f"Item: {self.to_sell.definite_name()}\nRarity: {self.to_sell.rarity}\nDomain: {self.to_sell.elemental_domain}"
+            continue_message = f"Fence for ${self.to_sell.value} [Y/N]?"
+        
+        # Then draw a big victory banner
+        BANNER_WIDTH = 30
+        BANNER_HEIGHT = 8
+        banner_x = console.width // 2 - BANNER_WIDTH // 2
+        banner_y = console.height // 2 - BANNER_HEIGHT // 2
+        
+        console.print_box(0, 0, console.width, banner_y, "Honest Aerith's Transdimensional Pawnbroker", fg=(255, 0, 0))
+        
+        console.draw_frame(banner_x, banner_y, BANNER_WIDTH, BANNER_HEIGHT, decoration="+-+| |+-+", fg=color)
+        console.print_box(banner_x + 1, banner_y + 1, BANNER_WIDTH - 2, BANNER_HEIGHT - 2 - 1, message, fg=color, alignment=tcod.libtcodpy.LEFT)
+        console.print_box(banner_x + 1, banner_y + BANNER_HEIGHT - 2, BANNER_WIDTH - 2, 1, continue_message, fg=color, alignment=tcod.libtcodpy.RIGHT)
+        
+        
+    def handle_event(self, event: Optional[tcod.event.Event]) -> Optional[GameState]:
+        if isinstance(event, tcod.event.KeyDown):
+            if event.sym in (tcod.event.KeySym.ESCAPE, tcod.event.KeySym.n):
+                # Go back without selling
+                return self.return_state
+            elif event.sym == tcod.event.KeySym.y:
+                if self.to_sell is not None:
+                    # Sell the item
+                    self.world.player.remove_loot(self.to_sell)
+                    self.world.player.money += self.to_sell.value
+                # Go back
+                return self.return_state
         
 class LoadingState(GameState):
     """
@@ -1211,6 +1297,8 @@ def force_normal_shape(context: tcod.context.Context) -> None:
         context.sdl_window.size = (context.sdl_window.size[0], 2 * context.sdl_window.size[0])
 
 def main() -> None:
+    profanity.load_censor_words()
+
     #FONT="Alloy_curses_12x12.png"
     FONT="Curses_square_24.png"
     tileset = tcod.tileset.load_tilesheet(
