@@ -1395,7 +1395,7 @@ def force_normal_shape(context: tcod.context.Context) -> None:
         context.sdl_window.size = (context.sdl_window.size[0], 2 * context.sdl_window.size[0])
 
 def main() -> None:
-    DEMO_MODE = True
+    DEMO_MODE = False
     if DEMO_MODE:
         # Just exercise the generator settings
         generator = ProceduralGenerator()
