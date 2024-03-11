@@ -44,9 +44,9 @@ class ProceduralGenerator:
     
     # This holds a prompt template for each type of object.
     PROMPTS = {
-        "enemy": "An enemy type for my 7DRL roguelike, way better than \"{}\" or \"{}\" from the last game. The \"a\" or \"the\" is *not* in the name, and I tried to really make it fit in with its elemental domain.",
-        "obstacle": "An obstacle type in a level for my 7DRL roguelike, way better than \"{}\" or \"{}\" from the last game. The \"a\" or \"the\" is *not* in the name, and I tried to really make it fit in with its elemental domain.",
-        "loot": "An item type that the player can loot for my 7DRL roguelike, way better than \"{}\" or \"{}\" from the last game. The \"a\" or \"the\" is *not* in the name, and I tried to really make it fit in with its elemental domain. It is *not* a person; you can't loot people."
+        "enemy": "An enemy type for my 7DRL roguelike, way better than \"{}\" or \"{}\" from the last game. I tried to make it fit in with its elemental domain.",
+        "obstacle": "An obstacle type in a level for my 7DRL roguelike, way better than \"{}\" or \"{}\" from the last game. I tried to make it fit in with its elemental domain.",
+        "loot": "A loot item type that the player can carry, use, and sell, for my 7DRL roguelike, way better than \"{}\" or \"{}\" from the last game. I tried to make it fit in with its elemental domain."
     }
     
     # This holds example item types used to vary the prompt.
@@ -87,7 +87,7 @@ class ProceduralGenerator:
     ELEMENTAL_DOMAINS = ["normal", "earth", "air", "fire", "water", "good", "evil", "business"]
     
     # How likely is a thing to differ from the domain of its parent?
-    DIFFERENT_DOMAIN_CHANCE = 0.1
+    DIFFERENT_DOMAIN_CHANCE = 0.15
     
     # Which domains beat which others?
     BEAT_PAIRS = {
@@ -237,7 +237,7 @@ class ProceduralGenerator:
         prompt += "\n\n```\n" + json.dumps(features, indent=2)[:-1].rstrip() + "," if len(features) > 0 else ""
         
         # Run the model
-        result = self.get_model()(prompt, grammar=self.get_grammar(object_type), stop=["\n\n"], max_tokens=-1, mirostat_mode=2, temperature=0.6)
+        result = self.get_model()(prompt, grammar=self.get_grammar(object_type), stop=["\n\n"], max_tokens=-1, mirostat_mode=2, temperature=0.7)
         # Grab the text
         result_text = result["choices"][0]["text"]
         
@@ -399,6 +399,13 @@ class WorldObject:
         if self.name is None:
             # Oops we rolled a none name with a bad grammar
             self.name = "(unnamed)"
+        # Drop articles from the name itself, the model loves to put them there.
+        if self.name.startswith("the "):
+            self.name = self.name[4:]
+        if self.name.startswith("a "):
+            self.name = self.name[2:]
+        if self.name.startswith("an "):
+            self.name = self.name[3:]
         self.indefinite_article = indefinite_article
         if self.indefinite_article == "a" and self.name[0].lower() in "aeiou":
             # Fix article

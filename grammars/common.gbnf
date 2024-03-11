@@ -17,7 +17,7 @@ thingName ::= q fewWords q
 
 fewWords ::= firstword | firstword " " word | firstword " " word " " word | firstword " " word " " word " " word | firstword " " word " " word " " word " " word
 
-firstword ::= normalword
+firstword ::= anyword
 word ::= anyword
 
 allcapsnormalword ::= [A-SU-Z] [A-Z] [A-Z] | [A-Z] [A-GI-Z] [A-Z] | [A-Z] [A-Z] [A-DF-Z] | [B-Z] | [B-Z] [A-Z] | [A-Z] [A-MO-Z] | [A-Z] [-A-Z] [A-Z] [-A-Z]* [A-Z]
