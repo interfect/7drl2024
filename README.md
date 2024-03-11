@@ -1,7 +1,7 @@
 # False Ghost
 A [7 Day Roguelike Challenge 2024](https://itch.io/jam/7drl-challenge-2024) game.
 
-Are you ready to take on enemies embodyng the power of **Fire**?
+Are you ready to take on enemies embodying the power of **Fire**?
 The fury of **Air**?
 The tedium of **Business**?
 
