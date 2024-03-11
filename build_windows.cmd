@@ -11,4 +11,7 @@ copy Curses_square_24.png "dist\False Ghost\Curses_square_24.png"
 mkdir "dist\False Ghost\grammars"
 copy grammars\*.gbnf "dist\False Ghost\grammars\"
 
+REM Copy docs
+copy README.md "dist\False Ghost\"
+
 pause
