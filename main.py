@@ -12,8 +12,6 @@ from tcod.event import KeySym
 
 from llama_cpp import Llama, LlamaGrammar
 
-from better_profanity import profanity
-
 import json
 import math
 import os
@@ -238,16 +236,10 @@ class ProceduralGenerator:
         # Add any existing keys, leaving off the closing brace and adding a trailing comma
         prompt += "\n\n```\n" + json.dumps(features, indent=2)[:-1].rstrip() + "," if len(features) > 0 else ""
         
-        while True:
-            # Run the model
-            result = self.get_model()(prompt, grammar=self.get_grammar(object_type), stop=["\n\n"], max_tokens=-1, mirostat_mode=2, temperature=0.6)
-            # Grab the text
-            result_text = result["choices"][0]["text"]
-            if profanity.contains_profanity(result_text):
-                print("Model cussed us out, try again.")
-            else:
-                # Keep it
-                break
+        # Run the model
+        result = self.get_model()(prompt, grammar=self.get_grammar(object_type), stop=["\n\n"], max_tokens=-1, mirostat_mode=2, temperature=0.6)
+        # Grab the text
+        result_text = result["choices"][0]["text"]
         
         print(result_text)
         
@@ -1402,9 +1394,6 @@ def main() -> None:
         while True:
             generator.invent_object("loot", rarity="common", elemental_domain="good")
         return 0
-        
-
-    profanity.load_censor_words()
 
     #FONT="Alloy_curses_12x12.png"
     FONT="Curses_square_24.png"

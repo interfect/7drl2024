@@ -1,5 +1,4 @@
 tcod==16.2.2
 llama-cpp-python==0.2.31
-better-profanity==0.7.0 
 pyinstaller==6.5.0
 
